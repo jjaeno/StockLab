@@ -1,0 +1,60 @@
+
+# --- Build directories ---
+/build/
+/target/
+/out/
+
+# --- Gradle files ---
+.gradle/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# --- Logs and temp files ---
+*.log
+*.tmp
+*.bak
+*.swp
+
+# --- Java / IDE cache ---
+*.class
+*.jar
+*.war
+*.ear
+*.iml
+
+# --- IntelliJ IDEA ---
+.idea/
+*.iws
+*.ipr
+
+# --- VS Code ---
+.vscode/
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+
+# --- Environment / Secret keys ---
+*.env
+*.yml
+*.yaml
+*.properties
+
+# ⚠️ 특정 설정파일(application.yml)은 보안상 제외
+# (DB 비밀번호, API 키 등 포함되어 있을 가능성 높음)
+src/main/resources/application.yml
+src/main/resources/application.yaml
+src/main/resources/application.properties
+
+# --- Test coverage / reports ---
+/reports/
+/test-output/
+/build/reports/
+/build/test-results/
+
+# --- Others ---
+/bin/
+/dependency-reduced-pom.xml
+/.classpath
+/.project
+/.settings/
