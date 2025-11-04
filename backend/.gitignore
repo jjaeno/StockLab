@@ -58,3 +58,4 @@ src/main/resources/application.properties
 /.classpath
 /.project
 /.settings/
+src/main/resources/firebase/StockLab-firebase-adminsdk.json
