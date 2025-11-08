@@ -2,10 +2,7 @@ package com.StockLab.backend.common;
 
 import lombok.Getter;
 
-/**
- * 비즈니스 로직 예외
- * ErrorCode와 함께 사용되는 커스텀 예외
- */
+/*=====비즈니스 로직 예외 클래스=====*/
 @Getter
 public class BusinessException extends RuntimeException {
     

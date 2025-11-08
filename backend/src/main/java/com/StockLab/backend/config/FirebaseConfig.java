@@ -53,7 +53,7 @@ public class FirebaseConfig {
      */
     @Bean
     public FirebaseAuth firebaseAuth(FirebaseApp firebaseApp) {
-        log.info("✅ FirebaseAuth instance created successfully!");
+        log.info("FirebaseAuth instance created successfully!");
         return FirebaseAuth.getInstance(firebaseApp);
     }
 }
