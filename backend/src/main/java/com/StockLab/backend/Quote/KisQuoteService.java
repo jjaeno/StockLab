@@ -40,8 +40,8 @@ public class KisQuoteService {
     private final Cache<String, QuoteDto.QuoteResponse> quoteCache;
     
     // TR_ID 상수 정의
-    private static final String TR_ID_PRICE = "FHKST01010100";        // 현재가 조회
-    private static final String TR_ID_DAILY_CHART = "FHKST03010100";  // 일자별 시세
+    private static final String TR_ID_PRICE = "FHKST01010100";        // 국내주식 현재가 시세
+    private static final String TR_ID_DAILY_CHART = "FHKST03010100";  // 국내주식 기간별 시세
     
     public KisQuoteService(WebClient.Builder webClientBuilder,
                           @Value("${api.kis.base-url}") String baseUrl,
@@ -84,8 +84,8 @@ public class KisQuoteService {
             String response = webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path("/uapi/domestic-stock/v1/quotations/inquire-price")
-                            .queryParam("fid_cond_mrkt_div_code", "J")  // 주식시장 구분 (J: 주식)
-                            .queryParam("fid_input_iscd", stockCode)    // 종목코드
+                            .queryParam("FID_COND_MRKT_DIV_CODE", "J")  // 주식시장 구분 (J: 주식)
+                            .queryParam("FID_INPUT_ISCD", stockCode)    // 종목코드
                             .build())
                     .header("Content-Type", "application/json; charset=utf-8")
                     .header("authorization", "Bearer " + accessToken)
@@ -143,6 +143,17 @@ public class KisQuoteService {
         
         try {
             String accessToken = tokenManager.getAccessToken();
+            // 기간 구분 코드 매핑
+            String periodCode;
+            switch (range.toUpperCase()) {
+                case "1D" -> periodCode = "D";   // 1일치 → 일봉
+                case "1W" -> periodCode = "D";   // 1주 → 일봉으로 최근 7일
+                case "1M" -> periodCode = "D";   // 1개월 → 일봉
+                case "3M" -> periodCode = "D";   // 3개월 → 일봉으로 3개월치
+                case "1Y" -> periodCode = "W";   // 1년 → 주봉
+                default -> periodCode = "D";
+            }
+            
             
             // 조회 기간 계산
             String endDate = getCurrentDate();
@@ -156,13 +167,15 @@ public class KisQuoteService {
                             .queryParam("FID_INPUT_ISCD", stockCode)
                             .queryParam("FID_INPUT_DATE_1", startDate)   // 조회 시작일 (YYYYMMDD)
                             .queryParam("FID_INPUT_DATE_2", endDate)     // 조회 종료일 (YYYYMMDD)
-                            .queryParam("FID_PERIOD_DIV_CODE", "D")      // D: 일봉
+                            .queryParam("FID_PERIOD_DIV_CODE", periodCode)      // D: 일봉
                             .queryParam("FID_ORG_ADJ_PRC", "0")          // 0: 수정주가 미반영
                             .build())
                     .header("Content-Type", "application/json; charset=utf-8")
                     .header("authorization", "Bearer " + accessToken)
                     .header("appkey", appKey)
+                    .header("appsecret", appSecret)
                     .header("tr_id", TR_ID_DAILY_CHART)
+                    .header("custtype", "P")
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
