@@ -129,7 +129,7 @@ public class KisTokenManager {
             this.tokenExpiry = LocalDateTime.now().plusHours(24);
             
             log.info("토큰 발급 성공!");
-            log.info("   - Access Token: {}...", accessToken.substring(0, 30));
+            log.info("   - Access Token: {}", accessToken.substring(0, 60));
             log.info("   - 만료 시각: {}", tokenExpiry.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
             
             // 캐시 파일에 저장
@@ -196,6 +196,7 @@ public class KisTokenManager {
             }
             
             log.debug("캐시된 토큰 로드 완료");
+            log.info("   - Access Token: {}", accessToken);
             return true;
             
         } catch (Exception e) {

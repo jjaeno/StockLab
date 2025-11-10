@@ -13,7 +13,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -34,6 +33,7 @@ public class KisQuoteService {
     private final WebClient webClient;
     private final KisTokenManager tokenManager;
     private final String appKey;
+    private final String appSecret;
     private final ObjectMapper objectMapper = new ObjectMapper();
     
     // 60초 TTL 캐시
@@ -46,9 +46,11 @@ public class KisQuoteService {
     public KisQuoteService(WebClient.Builder webClientBuilder,
                           @Value("${api.kis.base-url}") String baseUrl,
                           @Value("${api.kis.appkey}") String appKey,
+                          @Value("${api.kis.appsecret}") String appSecret,
                           KisTokenManager tokenManager) {
         this.webClient = webClientBuilder.baseUrl(baseUrl).build();
         this.appKey = appKey;
+        this.appSecret = appSecret;
         this.tokenManager = tokenManager;
         this.quoteCache = Caffeine.newBuilder()
                 .expireAfterWrite(60, TimeUnit.SECONDS)
@@ -82,14 +84,15 @@ public class KisQuoteService {
             String response = webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path("/uapi/domestic-stock/v1/quotations/inquire-price")
-                            .queryParam("FID_COND_MRKT_DIV_CODE", "J")  // 주식시장 구분 (J: 주식)
-                            .queryParam("FID_INPUT_ISCD", stockCode)    // 종목코드
+                            .queryParam("fid_cond_mrkt_div_code", "J")  // 주식시장 구분 (J: 주식)
+                            .queryParam("fid_input_iscd", stockCode)    // 종목코드
                             .build())
                     .header("Content-Type", "application/json; charset=utf-8")
                     .header("authorization", "Bearer " + accessToken)
                     .header("appkey", appKey)
-                    .header("appsecret", tokenManager.getAccessToken()) // appsecret도 헤더에 포함
+                    .header("appsecret", appSecret) // appsecret도 헤더에 포함
                     .header("tr_id", TR_ID_PRICE)
+                    .header("custtype", "P") //고객 구분(P: 개인)
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
@@ -105,6 +108,7 @@ public class KisQuoteService {
             
         } catch (Exception e) {
             log.error("시세 조회 실패: {} - {}", stockCode, e.getMessage());
+            log.debug("KIS 응답: {}", e);
             throw new BusinessException(ErrorCode.QUOTE_NOT_FOUND, 
                     "시세 조회 실패: " + stockCode);
         }
