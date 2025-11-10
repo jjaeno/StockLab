@@ -15,8 +15,6 @@ import java.util.*;
  * 
  * - 국내주식 (6자리 숫자)
  * - 미국주식 (영문 심볼)
- * - 홍콩주식 (.HK)
- * - 기타 해외주식 (거래소 명시)
  */
 @RestController
 @RequestMapping("/api/v1/quotes")
@@ -33,7 +31,6 @@ public class UnifiedQuoteController {
      * 
      * GET /api/v1/quotes/005930    → 삼성전자 (국내)
      * GET /api/v1/quotes/AAPL      → 애플 (미국)
-     * GET /api/v1/quotes/700.HK    → 텐센트 (홍콩)
      * 
      * 거래소를 명시하고 싶으면 exchange 파라미터 사용:
      * GET /api/v1/quotes/AAPL?exchange=NASDAQ
@@ -75,11 +72,6 @@ public class UnifiedQuoteController {
                     quote = overseasQuoteService.getUsStock(symbol);
                     break;
                     
-                case HONGKONG:
-                    log.debug("   → 홍콩 주식");
-                    quote = overseasQuoteService.getHkStock(symbol);
-                    break;
-                    
                 default:
                     throw new IllegalArgumentException("알 수 없는 종목 형식: " + symbol);
             }
@@ -96,7 +88,7 @@ public class UnifiedQuoteController {
     /**
      * 다중 종목 조회
      * 
-     * GET /api/v1/quotes?symbols=005930,AAPL,TSLA,000660,700.HK
+     * GET /api/v1/quotes?symbols=005930,AAPL,TSLA,000660
      * 
      * 쉼표로 구분하여 여러 종목을 한 번에 조회
      * 국내주식과 해외주식을 섞어서 사용 가능
@@ -128,9 +120,6 @@ public class UnifiedQuoteController {
                     case OVERSEAS:
                         quote = overseasQuoteService.getUsStock(symbol);
                         break;
-                    case HONGKONG:
-                        quote = overseasQuoteService.getHkStock(symbol);
-                        break;
                     default:
                         continue;
                 }
@@ -155,14 +144,13 @@ public class UnifiedQuoteController {
      * 
      * GET /api/v1/quotes/AAPL/candles?range=1M
      * GET /api/v1/quotes/005930/candles?range=3M
-     * GET /api/v1/quotes/700.HK/candles?range=1Y
      * GET /api/v1/quotes/AAPL/candles?range=1W&exchange=NASDAQ
      */
     @GetMapping("/{symbol}/candles")
     @Operation(
         summary = "캔들 차트 데이터 조회",
         description = "일자별 시가, 고가, 저가, 종가 데이터를 조회합니다.\n" +
-                      "국내주식 + 해외주식(미국, 홍콩 등) 지원"
+                      "국내주식 + 해외주식 지원"
     )
     public ApiResponse<QuoteDto.CandleResponse> getCandles(
             @PathVariable String symbol,
@@ -185,7 +173,6 @@ public class UnifiedQuoteController {
             switch (stockType) {
                 case DOMESTIC -> candles = domesticQuoteService.getCandles(symbol, range);
                 case OVERSEAS -> candles = overseasQuoteService.getUsCandlesForSymbol(symbol, range);
-                case HONGKONG -> candles = overseasQuoteService.getHkCandles(symbol, range);
                 default -> throw new IllegalArgumentException("지원하지 않는 종목 형식: " + symbol);
             }
         }
@@ -202,11 +189,6 @@ public class UnifiedQuoteController {
             return StockType.DOMESTIC;
         }
         
-        // .HK로 끝나면 → 홍콩주식
-        if (symbol.endsWith(".HK")) {
-            return StockType.HONGKONG;
-        }
-        
         // 영문 심볼 → 해외주식 (미국)
         if (symbol.matches("[A-Z]+")) {
             return StockType.OVERSEAS;
@@ -219,7 +201,6 @@ public class UnifiedQuoteController {
         return switch (type) {
             case DOMESTIC -> "한국 (KOSPI/KOSDAQ)";
             case OVERSEAS -> "해외 (미국/기타)";
-            case HONGKONG -> "홍콩 (HKEX)";
         };
     }
     
@@ -227,7 +208,6 @@ public class UnifiedQuoteController {
         return switch (type) {
             case DOMESTIC -> "KRW";
             case OVERSEAS -> "USD";
-            case HONGKONG -> "HKD";
         };
     }
     
@@ -237,7 +217,6 @@ public class UnifiedQuoteController {
     public enum StockType {
         DOMESTIC,   // 국내주식
         OVERSEAS,   // 해외주식 (미국 등)
-        HONGKONG    // 홍콩주식
     }
     
     /**

@@ -24,10 +24,6 @@ import java.util.stream.Collectors;
  * 
  * 지원 시장:
  * - 미국: 뉴욕(NYSE), 나스닥(NASDAQ), 아멕스(AMEX)
- * - 홍콩: 홍콩증권거래소(HKEX)
- * - 일본: 도쿄증권거래소(TSE)
- * - 중국: 상하이(SSE), 선전(SZSE)
- * - 베트남: 호치민(HOSE), 하노이(HNX)
  * 
  * 기능:
  * - 해외주식 현재가 조회
@@ -40,35 +36,32 @@ public class KisOverseasQuoteService {
     private final WebClient webClient;
     private final KisTokenManager tokenManager;
     private final String appKey;
+    private final String appSecret;
     private final ObjectMapper objectMapper = new ObjectMapper();
     
     // 60초 TTL 캐시
     private final Cache<String, QuoteDto.QuoteResponse> quoteCache;
     
     // TR_ID 상수
-    private static final String TR_ID_OVERSEAS_PRICE = "HHDFS00000300";   // 현재가 조회
+    private static final String TR_ID_OVERSEAS_PRICE = "HHDFS00000300";   // 해외주식 현재 체결가
     private static final String TR_ID_OVERSEAS_CANDLE = "HHDFS76240000";  // 캔들 차트 조회
 
     // 거래소 코드 매핑
     private static final Map<String, String> EXCHANGE_CODES = Map.of(
-        "NYSE", "NYS",      // 뉴욕증권거래소
+        "NYSE", "NYS",       // 뉴욕증권거래소
         "NASDAQ", "NAS",    // 나스닥
-        "AMEX", "AMS",      // 아멕스
-        "HKEX", "HKS",      // 홍콩
-        "TSE", "TSE",       // 도쿄
-        "SSE", "SHS",       // 상하이
-        "SZSE", "SZS",      // 선전
-        "HOSE", "HSX",      // 호치민
-        "HNX", "HNX"        // 하노이
+        "AMEX", "AMS"       // 아멕스
     );
     
     public KisOverseasQuoteService(WebClient.Builder webClientBuilder,
                                    @Value("${api.kis.base-url}") String baseUrl,
                                    @Value("${api.kis.appkey}") String appKey,
+                                   @Value("${api.kis.appsecret}") String appSecret,
                                    KisTokenManager tokenManager) {
         this.webClient = webClientBuilder.baseUrl(baseUrl).build();
         this.appKey = appKey;
         this.tokenManager = tokenManager;
+        this.appSecret = appSecret;
         this.quoteCache = Caffeine.newBuilder()
                 .expireAfterWrite(60, TimeUnit.SECONDS)
                 .maximumSize(1000)
@@ -80,8 +73,8 @@ public class KisOverseasQuoteService {
      * 
      * API: GET /uapi/overseas-price/v1/quotations/price
      * 
-     * @param symbol 종목 심볼 (예: AAPL, TSLA, 700.HK)
-     * @param exchange 거래소 코드 (예: NASDAQ, NYSE, HKEX)
+     * @param symbol 종목 심볼 (예: AAPL, TSLA)
+     * @param exchange 거래소 코드 (예: NASDAQ, NYSE)
      * @return 현재가, 등락률 등
      */
     public QuoteDto.QuoteResponse getOverseasQuote(String symbol, String exchange) {
@@ -100,7 +93,7 @@ public class KisOverseasQuoteService {
             String accessToken = tokenManager.getAccessToken();
             String exchangeCode = getExchangeCode(exchange);
             
-            // 심볼 정리 (홍콩은 .HK 제거)
+            // 심볼 정리
             String cleanSymbol = cleanSymbol(symbol);
             
             // API 호출
@@ -114,8 +107,9 @@ public class KisOverseasQuoteService {
                     .header("Content-Type", "application/json; charset=utf-8")
                     .header("authorization", "Bearer " + accessToken)
                     .header("appkey", appKey)
-                    .header("appsecret", tokenManager.getAccessToken())
+                    .header("appsecret", appSecret)
                     .header("tr_id", TR_ID_OVERSEAS_PRICE)
+                    .header("custtype", "P")
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
@@ -143,7 +137,7 @@ public class KisOverseasQuoteService {
      * API: GET /uapi/overseas-price/v1/quotations/dailyprice
      * 
      * @param symbol 종목 심볼 (예: AAPL, TSLA)
-     * @param exchange 거래소 코드 (예: NASDAQ, NYSE, HKEX)
+     * @param exchange 거래소 코드 (예: NASDAQ, NYSE)
      * @param range 조회 기간 (1D, 1W, 1M, 3M, 1Y)
      * @return 캔들 차트 데이터 (시가, 고가, 저가, 종가, 거래량)
      */
@@ -154,7 +148,13 @@ public class KisOverseasQuoteService {
             String accessToken = tokenManager.getAccessToken();
             String exchangeCode = getExchangeCode(exchange);
             String cleanSymbol = cleanSymbol(symbol);
-            
+
+            //기간 구분 코드 매핑 (국내와 동일)
+            String gubn;
+            switch (range.toUpperCase()) {
+                case "1Y" -> gubn = "1";  // 1년은 주봉
+                default -> gubn = "0";    // 나머지는 일봉
+            }
             // 조회 시작일 계산
             String startDate = calculateOverseasStartDate(range);
             
@@ -165,15 +165,16 @@ public class KisOverseasQuoteService {
                             .queryParam("AUTH", "")
                             .queryParam("EXCD", exchangeCode)      // 거래소 코드
                             .queryParam("SYMB", cleanSymbol)       // 종목 심볼
-                            .queryParam("GUBN", "0")               // 0: 일봉
+                            .queryParam("GUBN", gubn) // 0: 일봉, 1: 주봉
                             .queryParam("BYMD", startDate)         // 조회 시작일 (YYYYMMDD)
                             .queryParam("MODP", "1")               // 1: 수정주가 반영
                             .build())
                     .header("Content-Type", "application/json; charset=utf-8")
                     .header("authorization", "Bearer " + accessToken)
                     .header("appkey", appKey)
-                    .header("appsecret", tokenManager.getAccessToken())
+                    .header("appsecret", appSecret)
                     .header("tr_id", TR_ID_OVERSEAS_CANDLE)
+                    .header("custtype", "P")
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
@@ -223,46 +224,23 @@ public class KisOverseasQuoteService {
     }
     
     /**
-     * 홍콩 주식 시세 조회 (편의 메서드)
-     */
-    public QuoteDto.QuoteResponse getHkStock(String symbol) {
-        // .HK 제거 (예: 700.HK → 700)
-        String cleanSymbol = symbol.replace(".HK", "");
-        return getOverseasQuote(cleanSymbol, "HKEX");
-    }
-    
-    /**
-     * 홍콩 주식 캔들 조회 (편의 메서드)
-     */
-    public QuoteDto.CandleResponse getHkCandles(String symbol, String range) {
-        String cleanSymbol = symbol.replace(".HK", "");
-        return getOverseasCandles(cleanSymbol, "HKEX", range);
-    }
-    
-    /**
      * 해외주식 캔들 응답 파싱
-     * 
+     *
      * KIS 해외주식 캔들 응답 구조:
      * {
      *   "output2": [
-     *     {
-     *       "xymd": "20250115",       // 날짜 (YYYYMMDD)
-     *       "clos": "180.50",         // 종가
-     *       "open": "179.00",         // 시가
-     *       "high": "182.00",         // 고가
-     *       "low": "178.50",          // 저가
-     *       "tvol": "12345678"        // 거래량
-     *     },
+     *     { "xymd": "20250115", "clos": "180.50", "open": "179.00",
+     *       "high": "182.00", "low": "178.50", "tvol": "12345678" },
      *     ...
      *   ]
      * }
      */
-    private QuoteDto.CandleResponse parseOverseasCandleResponse(String symbol, String range, 
+    private QuoteDto.CandleResponse parseOverseasCandleResponse(String symbol, String range,
                                                                 String response) {
         try {
             JsonNode json = objectMapper.readTree(response);
             JsonNode output2 = json.get("output2");
-            
+
             if (output2 == null || output2.size() == 0) {
                 log.warn("캔들 데이터 없음: {}", symbol);
                 return QuoteDto.CandleResponse.builder()
@@ -276,30 +254,49 @@ public class KisOverseasQuoteService {
                         .volume(Collections.emptyList())
                         .build();
             }
-            
-            List<Long> timestamps = new ArrayList<>();
-            List<Double> open = new ArrayList<>();
-            List<Double> high = new ArrayList<>();
-            List<Double> low = new ArrayList<>();
-            List<Double> close = new ArrayList<>();
-            List<Long> volume = new ArrayList<>();
-            
-            // 데이터 파싱 (최신 데이터가 앞에 오므로 역순으로 처리)
+
+            //전체 데이터를 "오래된 순 → 최신 순"으로 쌓기
+            List<Long> allTimestamps = new ArrayList<>();
+            List<Double> allOpen = new ArrayList<>();
+            List<Double> allHigh = new ArrayList<>();
+            List<Double> allLow = new ArrayList<>();
+            List<Double> allClose = new ArrayList<>();
+            List<Long> allVolume = new ArrayList<>();
+
+            //KIS는 최신이 앞에 오기 때문에 역순으로 돌려서 오래된 것부터 쌓음
             for (int i = output2.size() - 1; i >= 0; i--) {
                 JsonNode candle = output2.get(i);
-                
-                // 날짜를 Unix timestamp로 변환
+
                 String dateStr = candle.get("xymd").asText();
-                timestamps.add(parseDateToTimestamp(dateStr));
-                
-                // OHLCV 데이터 추출
-                open.add(parseDoubleOrZero(candle.get("open")));
-                high.add(parseDoubleOrZero(candle.get("high")));
-                low.add(parseDoubleOrZero(candle.get("low")));
-                close.add(parseDoubleOrZero(candle.get("clos")));
-                volume.add(parseLongOrZero(candle.get("tvol")));
+                allTimestamps.add(parseDateToTimestamp(dateStr));
+
+                allOpen.add(parseDoubleOrZero(candle.get("open")));
+                allHigh.add(parseDoubleOrZero(candle.get("high")));
+                allLow.add(parseDoubleOrZero(candle.get("low")));
+                allClose.add(parseDoubleOrZero(candle.get("clos")));
+                allVolume.add(parseLongOrZero(candle.get("tvol")));
             }
-            
+
+            //range에 따라 "뒤에서 몇 개만" 자를지 결정
+            int maxCount = switch (range.toUpperCase()) {
+                case "1D" -> 1;    // 최근 1개
+                case "1W" -> 7;    // 최근 7개 (영업일 감안하면 실제로는 5개 정도 들어옴)
+                case "1M" -> 22;   // 대략 한 달 영업일
+                case "3M" -> 66;   // 3개월
+                case "1Y" -> 52;  // 주봉 기준 52주
+                default -> allTimestamps.size();
+            };
+
+            int size = allTimestamps.size();
+            int fromIndex = Math.max(0, size - maxCount);
+
+            List<Long> timestamps = new ArrayList<>(allTimestamps.subList(fromIndex, size));
+            List<Double> open = new ArrayList<>(allOpen.subList(fromIndex, size));
+            List<Double> high = new ArrayList<>(allHigh.subList(fromIndex, size));
+            List<Double> low = new ArrayList<>(allLow.subList(fromIndex, size));
+            List<Double> close = new ArrayList<>(allClose.subList(fromIndex, size));
+            List<Long> volume = new ArrayList<>(allVolume.subList(fromIndex, size));
+
             return QuoteDto.CandleResponse.builder()
                     .symbol(symbol)
                     .range(range)
@@ -310,7 +307,7 @@ public class KisOverseasQuoteService {
                     .close(close)
                     .volume(volume)
                     .build();
-                    
+
         } catch (Exception e) {
             log.error("캔들 응답 파싱 실패: {}", e.getMessage());
             throw new RuntimeException("해외주식 캔들 데이터 파싱 실패", e);
@@ -319,59 +316,90 @@ public class KisOverseasQuoteService {
     
     /**
      * 해외주식 현재가 응답 파싱
-     * 
+     *
      * KIS 해외주식 응답 구조:
      * {
+     *   "rt_cd": "0",
+     *   "msg_cd": "...",
+     *   "msg1": "...",
      *   "output": {
-     *     "last": "180.50",           // 현재가 (USD)
-     *     "diff": "2.30",             // 전일 대비
-     *     "rate": "1.29",             // 등락률 (%)
-     *     "high": "182.00",           // 고가
-     *     "low": "178.50",            // 저가
-     *     "open": "179.00",           // 시가
-     *     "base": "178.20",           // 전일 종가
-     *     "sign": "2"                 // 전일 대비 부호 (2:상승, 5:하락)
+     *     "rsym": "DNASAAPL",
+     *     "zdiv": "2",
+     *     "base": "178.20",   // 전일 종가
+     *     "pvol": "12345678", // 전일 거래량
+     *     "last": "180.50",   // 현재가
+     *     "sign": "2",        // 2:상승, 5:하락
+     *     "diff": "2.30",     // 전일 대비
+     *     "rate": "1.29",     // 등락률
+     *     "tvol": "6543210",  // 당일 거래량
+     *     "tamt": "1000000",  // 당일 거래대금
+     *     "ordy": "Y"
      *   }
      * }
      */
     private QuoteDto.QuoteResponse parseOverseasQuoteResponse(String symbol, String exchange,
-                                                              String response) {
+                                                            String response) {
         try {
-            JsonNode json = objectMapper.readTree(response);
-            JsonNode output = json.get("output");
-            
-            if (output == null) {
-                throw new RuntimeException("응답 데이터가 없습니다");
+            JsonNode root = objectMapper.readTree(response);
+
+            //응답 성공 여부 확인
+            String rtCd = root.path("rt_cd").asText("");
+            String msgCd = root.path("msg_cd").asText("");
+            String msg1  = root.path("msg1").asText("");
+
+            if (!"0".equals(rtCd)) {
+                log.error("해외주식 응답 실패: symbol={}, exchange={}, rt_cd={}, msg_cd={}, msg1={}",
+                        symbol, exchange, rtCd, msgCd, msg1);
+                throw new BusinessException(ErrorCode.QUOTE_NOT_FOUND,
+                        "해외주식 응답 실패: " + msg1);
             }
-            
-            BigDecimal currentPrice = new BigDecimal(output.get("last").asText());
-            BigDecimal change = new BigDecimal(output.get("diff").asText());
-            BigDecimal percentChange = new BigDecimal(output.get("rate").asText());
-            
-            // 전일 대비 부호 확인 (5: 하락)
-            String sign = output.get("sign").asText();
+
+            //output 노드 가져오기
+            JsonNode output = root.path("output");
+            if (output.isMissingNode() || output.isNull()) {
+                log.error("해외주식 output 데이터 없음: symbol={}, exchange={}, response={}",
+                        symbol, exchange, response);
+                throw new BusinessException(ErrorCode.QUOTE_NOT_FOUND,
+                        "해외주식 데이터가 없습니다");
+            }
+
+            //필수 값 파싱 (없으면 0으로 기본 처리)
+            BigDecimal currentPrice  = new BigDecimal(output.path("last").asText("0"));
+            BigDecimal diff          = new BigDecimal(output.path("diff").asText("0"));
+            BigDecimal percentChange = new BigDecimal(output.path("rate").asText("0"));
+            BigDecimal previousClose = new BigDecimal(output.path("base").asText("0"));
+
+            // 전일 대비 부호 확인 (5/4: 하락)
+            String sign = output.path("sign").asText("3"); // 3: 보합 가정
             if ("5".equals(sign) || "4".equals(sign)) {
-                change = change.negate();
+                diff = diff.negate();
                 percentChange = percentChange.negate();
             }
-            
-            BigDecimal previousClose = new BigDecimal(output.get("base").asText());
-            
+
+            //해외 현재가 API는 high/low/open을 안 주기 때문에, previousClose / currentPrice 기반으로 합리적 기본값 세팅
+            BigDecimal open = previousClose; // 전일 종가를 시가 비슷하게 사용
+            BigDecimal high = currentPrice.max(previousClose);
+            BigDecimal low  = currentPrice.min(previousClose);
+
             return QuoteDto.QuoteResponse.builder()
                     .symbol(symbol)
                     .currentPrice(currentPrice)
-                    .change(change)
+                    .change(diff)
                     .percentChange(percentChange)
-                    .high(new BigDecimal(output.get("high").asText()))
-                    .low(new BigDecimal(output.get("low").asText()))
-                    .open(new BigDecimal(output.get("open").asText()))
+                    .high(high)
+                    .low(low)
+                    .open(open)
                     .previousClose(previousClose)
                     .timestamp(System.currentTimeMillis() / 1000)
                     .build();
-                    
+
+        } catch (BusinessException e) {
+            // 위에서 이미 로깅했으니 그대로 던짐
+            throw e;
         } catch (Exception e) {
-            log.error("응답 파싱 실패: {}", e.getMessage());
-            throw new RuntimeException("해외주식 데이터 파싱 실패", e);
+            log.error("해외주식 응답 파싱 실패: symbol={}, exchange={}, error={}, response={}",
+                    symbol, exchange, e.getMessage(), response);
+            throw new BusinessException(ErrorCode.API_ERROR, "해외주식 데이터 파싱 실패");
         }
     }
     
