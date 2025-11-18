@@ -16,7 +16,7 @@ public class AuthDto {
         private String idToken;
     }
     
-    // 인증 응답 DTO
+    // 인증 응답 DTO (KRW/USD 분리)
     @Data
     @Builder
     @NoArgsConstructor
@@ -25,7 +25,8 @@ public class AuthDto {
         private String uid;
         private String email;
         private String displayName;
-        private BigDecimal cash;
+        private BigDecimal cashKrw;  // KRW 잔액
+        private BigDecimal cashUsd;  // USD 잔액
         private boolean newUser;
     }
 }
