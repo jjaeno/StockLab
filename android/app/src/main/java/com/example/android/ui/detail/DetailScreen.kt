@@ -1,5 +1,7 @@
 package com.example.android.ui.detail
 
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -11,7 +13,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -28,6 +33,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import kotlin.math.max
+import kotlin.math.min
 
 /**
  * 종목 상세 ViewModel
@@ -118,12 +125,10 @@ fun DetailScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
-    // 초기 데이터 로드
     LaunchedEffect(stockDetail.symbol) {
         viewModel.loadStockData(stockDetail.symbol, stockDetail.exchange)
     }
 
-    // 에러 메시지 표시
     LaunchedEffect(errorMessage) {
         errorMessage?.let {
             context.showToast(it)
@@ -177,7 +182,6 @@ fun DetailScreen(
                     .padding(paddingValues)
                     .verticalScroll(rememberScrollState())
             ) {
-                // 현재가 표시
                 quote?.let { quoteData ->
                     CurrentPriceSection(
                         quote = quoteData.quote,
@@ -187,7 +191,6 @@ fun DetailScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 차트 기간 선택
                 CandleRangeSelector(
                     selectedRange = selectedRange,
                     onRangeSelected = { range ->
@@ -197,14 +200,18 @@ fun DetailScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 차트 표시 (실제 차트는 MPAndroidChart 등을 사용해야 함)
                 candles?.let { candleData ->
-                    CandleChartPlaceholder(candleData)
+                    quote?.let { quoteData ->
+                        com.example.android.ui.components.StockChart(
+                            candleData = candleData,
+                            currency = quoteData.currency,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // 매수/매도 버튼
                 quote?.let { quoteData ->
                     TradeButtons(
                         symbol = stockDetail.symbol,
@@ -213,6 +220,8 @@ fun DetailScreen(
                         onNavigateToOrder = onNavigateToOrder
                     )
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }
@@ -236,7 +245,6 @@ private fun CurrentPriceSection(
         Column(
             modifier = Modifier.padding(20.dp)
         ) {
-            // 현재가
             Text(
                 text = quote.currentPrice.toFormattedCurrency(currency),
                 style = MaterialTheme.typography.displayMedium.copy(
@@ -246,7 +254,6 @@ private fun CurrentPriceSection(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 변동액 및 변동률
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = quote.change.toFormattedChange(currency),
@@ -267,7 +274,6 @@ private fun CurrentPriceSection(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 상세 정보
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -323,39 +329,128 @@ private fun CandleRangeSelector(
 }
 
 /**
- * 차트 플레이스홀더
- * 실제로는 MPAndroidChart 등을 사용하여 구현
+ * Compose 라인 차트 (애니메이션 포함)
  */
 @Composable
-private fun CandleChartPlaceholder(candles: CandleResponse) {
+private fun LineChartCompose(
+    candleData: CandleResponse,
+    modifier: Modifier = Modifier
+) {
+    val closeValues = candleData.close
+    if (closeValues.isEmpty()) return
+
+    val minValue = closeValues.minOrNull() ?: 0.0
+    val maxValue = closeValues.maxOrNull() ?: 0.0
+    val valueRange = maxValue - minValue
+
+    // 애니메이션
+    val animatedProgress = remember { Animatable(0f) }
+
+    LaunchedEffect(candleData) {
+        animatedProgress.snapTo(0f)
+        animatedProgress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 1000, easing = EaseInOut)
+        )
+    }
+
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(300.dp)
-            .padding(horizontal = 16.dp),
+        modifier = modifier,
         shape = RoundedCornerShape(16.dp),
         elevation = CardDefaults.cardElevation(4.dp)
     ) {
         Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "📊 차트 영역",
-                    style = MaterialTheme.typography.titleLarge
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val width = size.width
+                val height = size.height
+                val progress = animatedProgress.value
+
+                if (closeValues.size < 2) return@Canvas
+
+                val step = width / (closeValues.size - 1)
+
+                // 그리드 라인
+                val gridColor = Color.Gray.copy(alpha = 0.2f)
+                for (i in 0..4) {
+                    val y = height * i / 4
+                    drawLine(
+                        color = gridColor,
+                        start = Offset(0f, y),
+                        end = Offset(width, y),
+                        strokeWidth = 1f
+                    )
+                }
+
+                // 라인 차트 경로
+                val path = Path()
+                val visibleCount = (closeValues.size * progress).toInt().coerceAtLeast(1)
+
+                closeValues.take(visibleCount).forEachIndexed { index, value ->
+                    val x = index * step
+                    val normalizedValue = if (valueRange > 0) {
+                        ((value - minValue) / valueRange).toFloat()
+                    } else {
+                        0.5f
+                    }
+                    val y = height - (normalizedValue * height)
+
+                    if (index == 0) {
+                        path.moveTo(x, y)
+                    } else {
+                        path.lineTo(x, y)
+                    }
+                }
+
+                // 라인 그리기
+                drawPath(
+                    path = path,
+                    color = Color(0xFF3B82F6),
+                    style = Stroke(width = 3f)
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+
+                // 시작점과 끝점 원 그리기
+                if (visibleCount > 0) {
+                    val firstValue = closeValues[0]
+                    val firstY = height - (((firstValue - minValue) / valueRange).toFloat() * height)
+                    drawCircle(
+                        color = Color(0xFF3B82F6),
+                        radius = 6f,
+                        center = Offset(0f, firstY)
+                    )
+                }
+
+                if (visibleCount == closeValues.size) {
+                    val lastValue = closeValues.last()
+                    val lastX = (closeValues.size - 1) * step
+                    val lastY = height - (((lastValue - minValue) / valueRange).toFloat() * height)
+                    drawCircle(
+                        color = Color(0xFF3B82F6),
+                        radius = 6f,
+                        center = Offset(lastX, lastY)
+                    )
+                }
+            }
+
+            // 가격 범위 표시
+            Column(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 8.dp)
+            ) {
                 Text(
-                    text = "${candles.timestamps.size}개 데이터 포인트",
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = "%.0f".format(maxValue),
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.weight(1f))
                 Text(
-                    text = "MPAndroidChart 또는 다른 차트 라이브러리를\n사용하여 실제 차트를 표시합니다",
+                    text = "%.0f".format(minValue),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
             }
         }
@@ -375,10 +470,9 @@ private fun TradeButtons(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 24.dp),
+            .padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // 매도 버튼
         Button(
             onClick = {
                 onNavigateToOrder(symbol, OrderSide.SELL, currentPrice, exchange)
@@ -399,7 +493,6 @@ private fun TradeButtons(
             )
         }
 
-        // 매수 버튼
         Button(
             onClick = {
                 onNavigateToOrder(symbol, OrderSide.BUY, currentPrice, exchange)

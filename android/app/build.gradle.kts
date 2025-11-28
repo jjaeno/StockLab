@@ -111,7 +111,8 @@ dependencies {
     implementation("com.google.firebase:firebase-analytics-ktx")
 
     // ==== Accompanist (SwipeRefresh) ====
-    implementation("com.google.accompanist:accompanist-swiperefresh:0.34.0")
+    implementation("com.google.accompanist:accompanist-swiperefresh:0.30.1")
+
     // ===== Coil (이미지 로딩) =====
     implementation("io.coil-kt:coil-compose:2.5.0")
 

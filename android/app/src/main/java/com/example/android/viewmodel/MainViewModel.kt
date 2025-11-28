@@ -6,73 +6,67 @@ import com.example.android.data.api.ApiResult
 import com.example.android.data.model.*
 import com.example.android.data.repository.StockLabRepository
 import com.example.android.util.StockData
-import com.example.android.util.isDomesticStock
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * 메인 화면 ViewModel
- * - 주식 리스트 표시
+ * 메인 화면 ViewModel (완전 개선)
+ * - 전체 종목 시세 조회
  * - 관심종목 관리
  * - 검색 기능
- * - 시세 조회
  */
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val repository: StockLabRepository,
 ) : ViewModel() {
 
-    // 현재 로그인한 유저 uid (MainScreen에서 한번만 세팅)
     private var currentUid: String? = null
 
-    // 검색 쿼리
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    // 관심종목 목록
     private val _watchlist = MutableStateFlow<List<WatchlistItem>>(emptyList())
     val watchlist: StateFlow<List<WatchlistItem>> = _watchlist.asStateFlow()
 
-    // 관심종목 시세 정보
-    private val _watchlistQuotes =
-        MutableStateFlow<Map<String, UnifiedQuoteResponse>>(emptyMap())
-    val watchlistQuotes: StateFlow<Map<String, UnifiedQuoteResponse>> =
-        _watchlistQuotes.asStateFlow()
+    private val _watchlistQuotes = MutableStateFlow<Map<String, UnifiedQuoteResponse>>(emptyMap())
+    val watchlistQuotes: StateFlow<Map<String, UnifiedQuoteResponse>> = _watchlistQuotes.asStateFlow()
 
-    // 검색 결과
     private val _searchResults = MutableStateFlow<List<StockSearchResult>>(emptyList())
     val searchResults: StateFlow<List<StockSearchResult>> = _searchResults.asStateFlow()
 
-    // 로딩 상태
+    private val _allStocks = MutableStateFlow<List<StockData.Stock>>(emptyList())
+    val allStocks: StateFlow<List<StockData.Stock>> = _allStocks.asStateFlow()
+
+    // 전체 종목 시세 (새로 추가)
+    private val _allStockQuotes = MutableStateFlow<Map<String, UnifiedQuoteResponse>>(emptyMap())
+    val allStockQuotes: StateFlow<Map<String, UnifiedQuoteResponse>> = _allStockQuotes.asStateFlow()
+
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    // 에러 메시지
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     init {
-        // 검색 쿼리 변경 감지
+        _allStocks.value = StockData.getAllStocks()
+
         viewModelScope.launch {
             _searchQuery
-                .debounce(300) // 300ms 디바운스
+                .debounce(300)
                 .distinctUntilChanged()
                 .collect { query ->
                     performSearch(query)
                 }
         }
+
+        // 전체 종목 시세 로드 (일부만)
+        loadAllStockQuotes()
     }
 
-    /**
-     * 로그인한 유저 uid 설정
-     * - MainScreen에서 authResponse.uid 들어오면 한 번만 호출
-     */
     fun setUid(uid: String) {
-        // 같은 uid로 이미 로드했으면 다시 로드 안 함
         if (currentUid == uid && _watchlist.value.isNotEmpty()) return
-
         currentUid = uid
         loadWatchlist()
     }
@@ -88,15 +82,12 @@ class MainViewModel @Inject constructor(
                 when (result) {
                     is ApiResult.Success -> {
                         _watchlist.value = result.data.items
-                        // 관심종목 시세 조회
                         loadWatchlistQuotes()
                     }
-
                     is ApiResult.Error -> {
                         _errorMessage.value = result.message
                         _isLoading.value = false
                     }
-
                     is ApiResult.Loading -> {
                         _isLoading.value = true
                     }
@@ -127,14 +118,8 @@ class MainViewModel @Inject constructor(
                             quotes[item.symbol] = result.data
                             _watchlistQuotes.value = quotes.toMap()
                         }
-
-                        is ApiResult.Error -> {
-                            // 개별 종목 오류는 무시
-                        }
-
-                        is ApiResult.Loading -> {
-                            // 로딩 상태 유지
-                        }
+                        is ApiResult.Error -> {}
+                        is ApiResult.Loading -> {}
                     }
                 }
             }
@@ -144,8 +129,49 @@ class MainViewModel @Inject constructor(
     }
 
     /**
-     * 관심종목 추가
+     * 전체 종목 시세 조회 (일부만 - 상위 10개)
      */
+    private fun loadAllStockQuotes() {
+        viewModelScope.launch {
+            val quotes = mutableMapOf<String, UnifiedQuoteResponse>()
+
+            // 상위 10개 종목만 조회 (API 부하 방지)
+            val topStocks = _allStocks.value.take(10)
+
+            topStocks.forEach { stock ->
+                repository.getQuote(stock.symbol, null).collect { result ->
+                    when (result) {
+                        is ApiResult.Success -> {
+                            quotes[stock.symbol] = result.data
+                            _allStockQuotes.value = quotes.toMap()
+                        }
+                        is ApiResult.Error -> {}
+                        is ApiResult.Loading -> {}
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 특정 종목 시세 조회 (필요 시)
+     */
+    fun loadQuoteForStock(symbol: String) {
+        viewModelScope.launch {
+            repository.getQuote(symbol, null).collect { result ->
+                when (result) {
+                    is ApiResult.Success -> {
+                        val currentQuotes = _allStockQuotes.value.toMutableMap()
+                        currentQuotes[symbol] = result.data
+                        _allStockQuotes.value = currentQuotes
+                    }
+                    is ApiResult.Error -> {}
+                    is ApiResult.Loading -> {}
+                }
+            }
+        }
+    }
+
     fun addToWatchlist(symbol: String, exchange: String? = null) {
         val uid = currentUid ?: return
 
@@ -155,11 +181,9 @@ class MainViewModel @Inject constructor(
                     is ApiResult.Success -> {
                         loadWatchlist()
                     }
-
                     is ApiResult.Error -> {
                         _errorMessage.value = result.message
                     }
-
                     is ApiResult.Loading -> {
                         _isLoading.value = true
                     }
@@ -168,9 +192,6 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    /**
-     * 관심종목 삭제
-     */
     fun removeFromWatchlist(symbol: String, exchange: String? = null) {
         val uid = currentUid ?: return
 
@@ -180,11 +201,9 @@ class MainViewModel @Inject constructor(
                     is ApiResult.Success -> {
                         loadWatchlist()
                     }
-
                     is ApiResult.Error -> {
                         _errorMessage.value = result.message
                     }
-
                     is ApiResult.Loading -> {
                         _isLoading.value = true
                     }
@@ -193,16 +212,10 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    /**
-     * 검색 쿼리 업데이트
-     */
     fun updateSearchQuery(query: String) {
         _searchQuery.value = query
     }
 
-    /**
-     * 검색 실행 (로컬 데이터 기반)
-     */
     private fun performSearch(query: String) {
         val results = StockData.searchStocks(query)
 
@@ -211,29 +224,20 @@ class MainViewModel @Inject constructor(
                 symbol = stock.symbol,
                 name = stock.name,
                 market = stock.market
-                // exchange, currency는 기본값 사용 (필요 없으니 안 넘김)
             )
         }
     }
 
-    /**
-     * 단일 종목 시세 조회
-     */
     fun getQuote(symbol: String, exchange: String? = null): Flow<ApiResult<UnifiedQuoteResponse>> {
         return repository.getQuote(symbol, exchange)
     }
 
-    /**
-     * 에러 메시지 초기화
-     */
     fun clearError() {
         _errorMessage.value = null
     }
 
-    /**
-     * 새로고침
-     */
     fun refresh() {
         loadWatchlist()
+        loadAllStockQuotes()
     }
 }

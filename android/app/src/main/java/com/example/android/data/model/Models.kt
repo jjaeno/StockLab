@@ -3,7 +3,7 @@ package com.example.android.data.model
 import android.os.Parcelable
 import com.google.gson.annotations.SerializedName
 import kotlinx.parcelize.Parcelize
-import java.time.LocalDateTime
+
 
 /**
  * StockLab 데이터 모델
@@ -171,6 +171,7 @@ enum class TransactionType(val displayName: String, val koreanName: String) {
 
 data class PositionView(
     @SerializedName("symbol") val symbol: String,
+    @SerializedName("name") val name: String? = null, // 종목명 추가
     @SerializedName("quantity") val quantity: Double,
     @SerializedName("avgPrice") val avgPrice: Double,
     @SerializedName("currentPrice") val currentPrice: Double,
@@ -178,13 +179,17 @@ data class PositionView(
     @SerializedName("profitLoss") val profitLoss: Double,
     @SerializedName("currency") val currency: Currency
 ) {
-    // 수익률 계산
     val profitLossPercent: Double get() =
         if (avgPrice != 0.0) (profitLoss / (avgPrice * quantity)) * 100 else 0.0
 
-    // 수익 여부
     val isProfit: Boolean get() = profitLoss >= 0
+
+    // 종목명 가져오기 (백엔드에서 name이 없으면 로컬에서 찾기)
+    fun getDisplayName(): String {
+        return name ?: com.example.android.util.StockData.getStockName(symbol)
+    }
 }
+
 
 data class PortfolioResponse(
     @SerializedName("uid") val uid: String,
@@ -203,12 +208,20 @@ data class PortfolioResponse(
 // 관심종목 관련 모델
 // ==========================================
 
+// 관심종목 관련 모델 (수정)
 data class WatchlistItem(
     @SerializedName("id") val id: Long,
     @SerializedName("symbol") val symbol: String,
+    @SerializedName("name") val name: String? = null, // 종목명 추가
     @SerializedName("exchange") val exchange: String?,
     @SerializedName("createdAt") val createdAt: String
-)
+) {
+    // 종목명 가져오기
+    fun getDisplayName(): String {
+        return name ?: com.example.android.util.StockData.getStockName(symbol)
+    }
+}
+
 
 data class WatchlistResponse(
     @SerializedName("uid") val uid: String,

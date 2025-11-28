@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.UserProfileChangeRequest
 import com.example.android.data.api.ApiResult
 import com.example.android.data.model.AuthResponse
 import com.example.android.data.repository.StockLabRepository
@@ -18,6 +19,7 @@ import javax.inject.Inject
  * - Firebase 인증 관리
  * - 백엔드 토큰 검증
  * - 사용자 정보 전역 상태 관리
+ * - displayName null 문제 해결
  */
 
 @HiltViewModel
@@ -80,22 +82,31 @@ class AuthViewModel @Inject constructor(
 
     /**
      * 이메일/비밀번호 회원가입
+     * displayName을 Firebase User Profile에 저장
      */
     fun signUpWithEmail(email: String, password: String, displayName: String) {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
 
             try {
+                // 1. Firebase 계정 생성
                 val result = firebaseAuth.createUserWithEmailAndPassword(email, password).await()
+
                 result.user?.let { user ->
-                    // 사용자 프로필 업데이트
-                    val profileUpdates = com.google.firebase.auth.UserProfileChangeRequest.Builder()
+                    // 2. displayName을 Firebase User Profile에 저장
+                    val profileUpdates = UserProfileChangeRequest.Builder()
                         .setDisplayName(displayName)
                         .build()
+
                     user.updateProfile(profileUpdates).await()
 
-                    _currentUser.value = user
-                    verifyWithBackend(user)
+                    // 3. 프로필 업데이트 후 User 다시 로드
+                    user.reload().await()
+
+                    _currentUser.value = firebaseAuth.currentUser
+
+                    // 4. 백엔드 검증 (displayName 포함하여 전송)
+                    verifyWithBackend(firebaseAuth.currentUser!!)
                 } ?: run {
                     _authState.value = AuthState.Error("회원가입 실패")
                 }
@@ -118,22 +129,32 @@ class AuthViewModel @Inject constructor(
     /**
      * 백엔드 토큰 검증
      * Firebase ID Token을 백엔드로 전송하여 검증 및 사용자 정보 동기화
+     * displayName이 Firebase User Profile에서 정상적으로 전달됨
      */
     private fun verifyWithBackend(user: FirebaseUser) {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
 
             try {
-                // Firebase ID Token 가져오기
-                val idToken = user.getIdToken(false).await().token
+                // Firebase ID Token 가져오기 (강제 갱신)
+                val idToken = user.getIdToken(true).await().token
 
                 if (idToken != null) {
                     // 백엔드 API 호출
                     repository.verifyToken(idToken).collect { result ->
                         when (result) {
                             is ApiResult.Success -> {
-                                _authResponse.value = result.data
-                                _authState.value = AuthState.Authenticated(result.data)
+                                // displayName이 비어있으면 Firebase에서 가져온 이름으로 대체
+                                val authData = result.data
+                                val finalDisplayName = if (authData.displayName.isNullOrBlank()) {
+                                    user.displayName ?: "사용자"
+                                } else {
+                                    authData.displayName
+                                }
+
+                                val updatedAuth = authData.copy(displayName = finalDisplayName)
+                                _authResponse.value = updatedAuth
+                                _authState.value = AuthState.Authenticated(updatedAuth)
                             }
                             is ApiResult.Error -> {
                                 _authState.value = AuthState.Error(result.message)
@@ -161,6 +182,21 @@ class AuthViewModel @Inject constructor(
                 cashKrw = cashKrw ?: current.cashKrw,
                 cashUsd = cashUsd ?: current.cashUsd
             )
+        }
+    }
+
+    /**
+     * displayName 강제 새로고침 (디버깅용)
+     */
+    fun refreshUserProfile() {
+        viewModelScope.launch {
+            try {
+                firebaseAuth.currentUser?.reload()?.await()
+                _currentUser.value = firebaseAuth.currentUser
+                firebaseAuth.currentUser?.let { verifyWithBackend(it) }
+            } catch (e: Exception) {
+                _authState.value = AuthState.Error("프로필 새로고침 실패")
+            }
         }
     }
 }

@@ -3,18 +3,17 @@ package com.example.android
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -23,13 +22,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navArgument
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.example.android.data.model.OrderSide
 import com.example.android.data.model.StockDetail
 import com.example.android.ui.auth.LoginScreen
 import com.example.android.ui.detail.DetailScreen
+import com.example.android.ui.history.TradeHistoryScreen
 import com.example.android.ui.main.MainScreen
 import com.example.android.ui.order.OrderConfirmScreen
 import com.example.android.ui.portfolio.PortfolioScreen
@@ -44,6 +43,7 @@ import javax.inject.Inject
  * - Firebase 초기화
  * - Hilt 의존성 주입
  * - Jetpack Compose UI
+ * - Navigation 완전 구현
  */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -54,7 +54,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Firebase 초기화
         if (FirebaseApp.getApps(this).isEmpty()) {
             FirebaseApp.initializeApp(this)
         }
@@ -76,7 +75,6 @@ fun StockLabApp() {
     val authState by authViewModel.authState.collectAsState()
     val navController = rememberNavController()
 
-    // 인증 상태에 따라 화면 전환
     when (authState) {
         is AuthState.Authenticated -> {
             MainNavigation(navController)
@@ -85,7 +83,7 @@ fun StockLabApp() {
             LoginScreen(
                 viewModel = authViewModel,
                 onLoginSuccess = {
-                    // 로그인 성공 시 자동으로 Authenticated 상태가 됨
+                    // 자동으로 Authenticated 상태가 됨
                 }
             )
         }
@@ -207,12 +205,12 @@ fun MainNavigation(navController: NavHostController) {
                 )
             }
 
-            // 거래 내역 화면 (간단하게 구현)
+            // 거래 내역 화면
             composable(Route.HISTORY) {
-                OrderHistoryScreen()
+                TradeHistoryScreen()
             }
 
-            // 설정 화면 (간단하게 구현)
+            // 설정 화면
             composable(Route.SETTINGS) {
                 SettingsScreen()
             }
@@ -242,39 +240,12 @@ sealed class BottomNavItem(
 ) {
     object Main : BottomNavItem(Route.MAIN, Icons.Default.Home, "홈")
     object Portfolio : BottomNavItem(Route.PORTFOLIO, Icons.Default.AccountBalance, "포트폴리오")
-    object History : BottomNavItem(Route.HISTORY, Icons.Default.List, "내역")
+    object History : BottomNavItem(Route.HISTORY, Icons.Default.List, "거래내역")
     object Settings : BottomNavItem(Route.SETTINGS, Icons.Default.Settings, "설정")
 }
 
 /**
- * 거래 내역 화면 (간단 구현)
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun OrderHistoryScreen() {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("거래 내역") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = Color.White
-                )
-            )
-        }
-    ) { padding ->
-        // 실제로는 OrderRepository를 통해 거래 내역을 불러와야 함
-        Box(
-            modifier = Modifier.padding(padding),
-            contentAlignment = androidx.compose.ui.Alignment.Center
-        ) {
-            Text("거래 내역 화면 (구현 예정)")
-        }
-    }
-}
-
-/**
- * 설정 화면 (간단 구현)
+ * 설정 화면
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -295,30 +266,32 @@ fun SettingsScreen(
         }
     ) { padding ->
         Column(
-            modifier = Modifier.padding(padding).padding(16.dp)
+            modifier = Modifier
+                .padding(padding)
+                .padding(16.dp)
         ) {
             authResponse?.let { auth ->
                 Card(
-                    modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Column(modifier = androidx.compose.ui.Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                         Text(
                             text = "계정 정보",
                             style = MaterialTheme.typography.titleMedium
                         )
-                        androidx.compose.foundation.layout.Spacer(modifier = androidx.compose.ui.Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text("이름: ${auth.displayName}")
                         Text("이메일: ${auth.email}")
                         Text("UID: ${auth.uid}")
                     }
                 }
 
-                androidx.compose.foundation.layout.Spacer(modifier = androidx.compose.ui.Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 Button(
                     onClick = { authViewModel.signOut() },
-                    modifier = androidx.compose.ui.Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("로그아웃")
                 }

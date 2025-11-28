@@ -70,6 +70,13 @@ class PortfolioViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 특정 종목의 보유 수량 조회
+     */
+    fun getHoldingQuantity(symbol: String): Double {
+        return _portfolio.value?.positions?.find { it.symbol == symbol }?.quantity ?: 0.0
+    }
+
     fun clearError() {
         _errorMessage.value = null
     }
@@ -96,7 +103,6 @@ fun PortfolioScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
-    // 에러 메시지 표시
     LaunchedEffect(errorMessage) {
         errorMessage?.let {
             context.showToast(it)
@@ -134,12 +140,10 @@ fun PortfolioScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // 총 자산 카드
                     item {
                         TotalAssetsCard(portfolio = data)
                     }
 
-                    // 보유 종목 헤더
                     item {
                         Text(
                             text = "보유 종목",
@@ -149,7 +153,6 @@ fun PortfolioScreen(
                         )
                     }
 
-                    // 보유 종목 리스트
                     if (data.positions.isEmpty()) {
                         item { EmptyPositionsCard() }
                     } else {
@@ -163,7 +166,7 @@ fun PortfolioScreen(
                                     onStockClick(
                                         StockDetail(
                                             symbol = position.symbol,
-                                            name = position.symbol,
+                                            name = position.getDisplayName(),
                                             exchange = null,
                                             stockType = stockType,
                                             currency = position.currency
@@ -179,9 +182,6 @@ fun PortfolioScreen(
     }
 }
 
-/**
- * 총 자산 카드
- */
 @Composable
 private fun TotalAssetsCard(portfolio: PortfolioResponse) {
     Card(
@@ -203,7 +203,6 @@ private fun TotalAssetsCard(portfolio: PortfolioResponse) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // KRW 자산
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -237,7 +236,6 @@ private fun TotalAssetsCard(portfolio: PortfolioResponse) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // USD 자산
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -268,9 +266,6 @@ private fun TotalAssetsCard(portfolio: PortfolioResponse) {
     }
 }
 
-/**
- * 보유 종목 카드
- */
 @Composable
 private fun PositionCard(
     position: PositionView,
@@ -290,11 +285,19 @@ private fun PositionCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
+                // 종목명 표시 (개선)
                 Text(
-                    text = position.symbol,
+                    text = position.getDisplayName(),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold
                     )
+                )
+
+                // 심볼 작게 표시
+                Text(
+                    text = position.symbol,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))
@@ -341,9 +344,6 @@ private fun PositionCard(
     }
 }
 
-/**
- * 빈 포지션 카드
- */
 @Composable
 private fun EmptyPositionsCard() {
     Card(

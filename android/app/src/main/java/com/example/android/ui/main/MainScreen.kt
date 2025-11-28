@@ -27,11 +27,9 @@ import com.example.android.viewmodel.AuthViewModel
 import com.example.android.viewmodel.MainViewModel
 
 /**
- * 메인 화면
- * - 잔고 표시
- * - 관심종목 리스트
- * - 검색 기능
- * - 스와이프 새로고침
+ * 메인 화면 (완전 개선)
+ * - 관심종목 섹션 (맨 위)
+ * - 전체 종목 리스트 (가격변동 + 관심종목 토글 버튼)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,17 +45,17 @@ fun MainScreen(
     val watchlistQuotes by mainViewModel.watchlistQuotes.collectAsState()
     val searchQuery by mainViewModel.searchQuery.collectAsState()
     val searchResults by mainViewModel.searchResults.collectAsState()
+    val allStocks by mainViewModel.allStocks.collectAsState()
+    val allStockQuotes by mainViewModel.allStockQuotes.collectAsState()
     val isLoading by mainViewModel.isLoading.collectAsState()
     val errorMessage by mainViewModel.errorMessage.collectAsState()
 
-    // uid 들어오면 ViewModel에 전달해서 관심종목 로드
     LaunchedEffect(authResponse?.uid) {
         authResponse?.uid?.let { uid ->
             mainViewModel.setUid(uid)
         }
     }
 
-    // 에러 메시지 표시
     LaunchedEffect(errorMessage) {
         errorMessage?.let {
             context.showToast(it)
@@ -65,7 +63,6 @@ fun MainScreen(
         }
     }
 
-    // Swipe Refresh State
     val swipeRefreshState = rememberSwipeRefreshState(isLoading)
 
     Scaffold(
@@ -74,10 +71,11 @@ fun MainScreen(
                 title = { Text("StockLab", fontWeight = FontWeight.Bold) },
                 actions = {
                     IconButton(onClick = { mainViewModel.refresh() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "새로고침")
-                    }
-                    IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "설정")
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "새로고침",
+                            tint = Color.White
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -93,71 +91,199 @@ fun MainScreen(
             onRefresh = { mainViewModel.refresh() },
             modifier = Modifier.padding(paddingValues)
         ) {
-            Column(
-                modifier = Modifier.fillMaxSize()
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 16.dp)
             ) {
-                // 잔고 표시 섹션
-                authResponse?.let { auth ->
-                    BalanceCard(
-                        cashKrw = auth.cashKrw,
-                        cashUsd = auth.cashUsd,
-                        displayName = auth.displayName
+                // 잔고 카드
+                item {
+                    authResponse?.let { auth ->
+                        BalanceCard(
+                            displayName = auth.displayName,
+                            cashKrw = auth.cashKrw,
+                            cashUsd = auth.cashUsd
+                        )
+                    }
+                }
+
+                // 검색바
+                item {
+                    SearchBar(
+                        query = searchQuery,
+                        onQueryChange = { mainViewModel.updateSearchQuery(it) },
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                     )
                 }
 
-                // 검색 바
-                SearchBar(
-                    query = searchQuery,
-                    onQueryChange = { mainViewModel.updateSearchQuery(it) },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                )
-
-                // 검색 중이면 검색 결과 표시
+                // 검색 중일 때
                 if (searchQuery.isNotEmpty()) {
-                    SearchResultsList(
-                        results = searchResults,
-                        onStockClick = { stock ->
-                            val stockType = if (stock.symbol.isDomesticStock())
-                                StockType.DOMESTIC else StockType.OVERSEAS
-                            val currency = if (stockType == StockType.DOMESTIC)
-                                Currency.KRW else Currency.USD
+                    item {
+                        Text(
+                            text = "검색 결과",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
 
-                            onStockClick(
-                                StockDetail(
-                                    symbol = stock.symbol,
-                                    name = stock.name,
-                                    exchange = null,
-                                    stockType = stockType,
-                                    currency = currency
+                    items(searchResults) { stock ->
+                        SearchResultItem(
+                            stock = stock,
+                            onClick = {
+                                val stockType = if (stock.symbol.isDomesticStock())
+                                    StockType.DOMESTIC else StockType.OVERSEAS
+                                val currency = if (stockType == StockType.DOMESTIC)
+                                    Currency.KRW else Currency.USD
+
+                                onStockClick(
+                                    StockDetail(
+                                        symbol = stock.symbol,
+                                        name = stock.name,
+                                        exchange = null,
+                                        stockType = stockType,
+                                        currency = currency
+                                    )
                                 )
-                            )
-                        },
-                        onAddToWatchlist = { stock ->
-                            mainViewModel.addToWatchlist(stock.symbol, null)
-                            context.showToast("${stock.name} 관심종목 추가")
-                        }
-                    )
+                            },
+                            onAddClick = {
+                                mainViewModel.addToWatchlist(stock.symbol, null)
+                                context.showToast("${stock.name} 관심종목 추가")
+                            }
+                        )
+                    }
                 } else {
-                    // 관심종목 리스트
-                    WatchlistSection(
-                        watchlist = watchlist,
-                        quotes = watchlistQuotes,
-                        onStockClick = { item, quote ->
-                            onStockClick(
-                                StockDetail(
-                                    symbol = item.symbol,
-                                    name = item.symbol, // 이름은 실제로는 별도 API나 로컬 DB에서 가져와야 함
-                                    exchange = item.exchange,
-                                    stockType = quote.stockType,
-                                    currency = quote.currency
+                    // 관심종목 섹션
+                    item {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.Star,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "관심종목",
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                            }
+                            Text(
+                                text = "${watchlist.size}개",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
+
+                    if (watchlist.isEmpty()) {
+                        item {
+                            EmptyWatchlistCard()
+                        }
+                    } else {
+                        items(watchlist) { item ->
+                            val quote = watchlistQuotes[item.symbol]
+                            val stockName = item.getDisplayName()
+                            val isInWatchlist = true
+
+                            EnhancedStockItemCard(
+                                symbol = item.symbol,
+                                name = stockName,
+                                quote = quote,
+                                isInWatchlist = isInWatchlist,
+                                onClick = {
+                                    quote?.let {
+                                        onStockClick(
+                                            StockDetail(
+                                                symbol = item.symbol,
+                                                name = stockName,
+                                                exchange = item.exchange,
+                                                stockType = it.stockType,
+                                                currency = it.currency
+                                            )
+                                        )
+                                    }
+                                },
+                                onToggleWatchlist = {
+                                    mainViewModel.removeFromWatchlist(item.symbol, item.exchange)
+                                    context.showToast("${stockName} 관심종목 삭제")
+                                }
+                            )
+                        }
+                    }
+
+                    // 전체 종목 리스트
+                    item {
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.List,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "전체 종목",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold
                                 )
                             )
-                        },
-                        onRemoveClick = { item ->
-                            mainViewModel.removeFromWatchlist(item.symbol, item.exchange)
-                            context.showToast("${item.symbol} 관심종목 삭제")
                         }
-                    )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    items(allStocks) { stock ->
+                        val quote = allStockQuotes[stock.symbol]
+                        val isInWatchlist = watchlist.any { it.symbol == stock.symbol }
+
+                        EnhancedStockItemCard(
+                            symbol = stock.symbol,
+                            name = stock.name,
+                            quote = quote,
+                            isInWatchlist = isInWatchlist,
+                            onClick = {
+                                val stockType = if (stock.symbol.isDomesticStock())
+                                    StockType.DOMESTIC else StockType.OVERSEAS
+                                val currency = if (stockType == StockType.DOMESTIC)
+                                    Currency.KRW else Currency.USD
+
+                                onStockClick(
+                                    StockDetail(
+                                        symbol = stock.symbol,
+                                        name = stock.name,
+                                        exchange = null,
+                                        stockType = stockType,
+                                        currency = currency
+                                    )
+                                )
+                            },
+                            onToggleWatchlist = {
+                                if (isInWatchlist) {
+                                    mainViewModel.removeFromWatchlist(stock.symbol, null)
+                                    context.showToast("${stock.name} 관심종목 삭제")
+                                } else {
+                                    mainViewModel.addToWatchlist(stock.symbol, null)
+                                    context.showToast("${stock.name} 관심종목 추가")
+                                }
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -165,13 +291,104 @@ fun MainScreen(
 }
 
 /**
- * 잔고 카드
+ * 개선된 종목 아이템 카드 (가격변동 + 관심종목 토글)
  */
 @Composable
+private fun EnhancedStockItemCard(
+    symbol: String,
+    name: String,
+    quote: UnifiedQuoteResponse?,
+    isInWatchlist: Boolean,
+    onClick: () -> Unit,
+    onToggleWatchlist: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clickable(onClick = onClick, enabled = quote != null),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 왼쪽: 종목 정보
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Text(
+                    text = symbol,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+
+            // 중간: 가격 정보
+            if (quote != null) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                    horizontalAlignment = Alignment.End
+                ) {
+                    val quoteData = quote.quote
+                    Text(
+                        text = quoteData.currentPrice.toFormattedCurrency(quote.currency),
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = quoteData.change.toFormattedChange(quote.currency),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = quoteData.change.getPriceChangeColor()
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = quoteData.percentChange.toFormattedPercent(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = quoteData.change.getPriceChangeColor()
+                        )
+                    }
+                }
+            } else {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .size(24.dp),
+                    strokeWidth = 2.dp
+                )
+            }
+
+            // 오른쪽: 관심종목 토글
+            IconButton(
+                onClick = onToggleWatchlist,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = if (isInWatchlist) Icons.Default.Star else Icons.Default.StarBorder,
+                    contentDescription = if (isInWatchlist) "관심종목 삭제" else "관심종목 추가",
+                    tint = if (isInWatchlist) Color(0xFFFFC107) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun BalanceCard(
+    displayName: String,
     cashKrw: Double,
-    cashUsd: Double,
-    displayName: String
+    cashUsd: Double
 ) {
     Card(
         modifier = Modifier
@@ -188,7 +405,9 @@ private fun BalanceCard(
         ) {
             Text(
                 text = "${displayName}님의 잔고",
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold
+                ),
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
 
@@ -232,9 +451,6 @@ private fun BalanceCard(
     }
 }
 
-/**
- * 검색 바
- */
 @Composable
 private fun SearchBar(
     query: String,
@@ -259,32 +475,6 @@ private fun SearchBar(
     )
 }
 
-/**
- * 검색 결과 리스트
- */
-@Composable
-private fun SearchResultsList(
-    results: List<StockSearchResult>,
-    onStockClick: (StockSearchResult) -> Unit,
-    onAddToWatchlist: (StockSearchResult) -> Unit
-) {
-    LazyColumn(
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        items(results) { stock ->
-            SearchResultItem(
-                stock = stock,
-                onClick = { onStockClick(stock) },
-                onAddClick = { onAddToWatchlist(stock) }
-            )
-        }
-    }
-}
-
-/**
- * 검색 결과 아이템
- */
 @Composable
 private fun SearchResultItem(
     stock: StockSearchResult,
@@ -294,11 +484,9 @@ private fun SearchResultItem(
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Row(
@@ -340,166 +528,34 @@ private fun SearchResultItem(
     }
 }
 
-/**
- * 관심종목 섹션
- */
 @Composable
-private fun WatchlistSection(
-    watchlist: List<WatchlistItem>,
-    quotes: Map<String, UnifiedQuoteResponse>,
-    onStockClick: (WatchlistItem, UnifiedQuoteResponse) -> Unit,
-    onRemoveClick: (WatchlistItem) -> Unit
-) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        // 섹션 헤더
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "관심종목",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.Bold
-                )
-            )
-            Text(
-                text = "${watchlist.size}개",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-            )
-        }
-
-        if (watchlist.isEmpty()) {
-            // 빈 상태
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Default.Star,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "관심종목이 없습니다",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "검색을 통해 종목을 추가해보세요",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                    )
-                }
-            }
-        } else {
-            // 관심종목 리스트
-            LazyColumn(
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(watchlist) { item ->
-                    val quote = quotes[item.symbol]
-                    WatchlistItemCard(
-                        item = item,
-                        quote = quote,
-                        onClick = {
-                            quote?.let { onStockClick(item, it) }
-                        },
-                        onRemoveClick = { onRemoveClick(item) }
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * 관심종목 아이템 카드
- */
-@Composable
-private fun WatchlistItemCard(
-    item: WatchlistItem,
-    quote: UnifiedQuoteResponse?,
-    onClick: () -> Unit,
-    onRemoveClick: () -> Unit
-) {
+private fun EmptyWatchlistCard() {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick, enabled = quote != null),
+            .padding(16.dp)
+            .height(120.dp),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(2.dp)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = item.symbol,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold
-                    )
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-
-                if (quote != null) {
-                    val quoteData = quote.quote
-                    Text(
-                        text = quoteData.currentPrice.toFormattedCurrency(quote.currency),
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.Bold
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = quoteData.change.toFormattedChange(quote.currency),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = quoteData.change.getPriceChangeColor()
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = quoteData.percentChange.toFormattedPercent(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = quoteData.change.getPriceChangeColor()
-                        )
-                    }
-                } else {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 2.dp
-                    )
-                }
-            }
-
-            IconButton(
-                onClick = onRemoveClick,
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.errorContainer)
-            ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(
-                    Icons.Default.Delete,
-                    contentDescription = "삭제",
-                    tint = MaterialTheme.colorScheme.onErrorContainer
+                    Icons.Default.StarBorder,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "관심종목이 없습니다",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 )
             }
         }
