@@ -116,9 +116,11 @@ public class UnifiedQuoteController {
                 switch (stockType) {
                     case DOMESTIC:
                         quote = domesticQuoteService.getQuote(symbol);
+                        Thread.sleep(50);      // 국내 주식 완충
                         break;
                     case OVERSEAS:
                         quote = overseasQuoteService.getUsStock(symbol);
+                        Thread.sleep(200);     // 해외주식 (VTS 필수)
                         break;
                     default:
                         continue;

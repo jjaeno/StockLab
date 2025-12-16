@@ -204,7 +204,7 @@ fun MainScreen(
                             items = watchlist,
                             key = { "${it.exchange ?: "NONE"}_${it.symbol}" }
                         ) { item ->
-                            val quote = watchlistQuotes["${item.exchange ?: "NONE"}_${item.symbol}"]
+                            val quote = watchlistQuotes[item.symbol]
                             val stockName = item.getDisplayName()
                             val isInWatchlist = true
 
@@ -264,7 +264,7 @@ fun MainScreen(
                         items = allStocks,
                         key = { "${it.market}_${it.symbol}" }
                     ) { stock ->
-                        val quote = allStockQuotes["${stock.market}_${stock.symbol}"]
+                        val quote = allStockQuotes[stock.symbol]
                         val isInWatchlist = watchlist.any { it.symbol == stock.symbol }
 
                         EnhancedStockItemCard(

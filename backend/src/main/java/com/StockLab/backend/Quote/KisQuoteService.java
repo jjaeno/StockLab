@@ -11,7 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-
+import java.time.Duration;
 import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -95,7 +95,7 @@ public class KisQuoteService {
                     .header("custtype", "P") //고객 구분(P: 개인)
                     .retrieve()
                     .bodyToMono(String.class)
-                    .block();
+                    .block(Duration.ofSeconds(3)); //3초 타임아웃
             
             // 응답 파싱
             QuoteDto.QuoteResponse quote = parseQuoteResponse(stockCode, response);

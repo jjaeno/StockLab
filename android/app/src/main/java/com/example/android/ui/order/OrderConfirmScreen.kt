@@ -93,9 +93,14 @@ fun OrderConfirmScreen(
 ) {
     val context = LocalContext.current
     val authResponse by authViewModel.authResponse.collectAsState()
+    // 포트폴리오 로드
+    val uid = authViewModel.uid
+    LaunchedEffect(uid) {
+        uid?.let { portfolioViewModel.loadPortfolio(it) }
+    }
     val orderState by orderViewModel.orderState.collectAsState()
 
-    // 보유 수량 조회
+    // 보유 수량 조회 (포트폴리오가 로드되었다면 실제 수량, 아니면 0.0)
     val holdingQuantity = if (side == OrderSide.SELL) {
         portfolioViewModel.getHoldingQuantity(symbol)
     } else {
@@ -115,6 +120,12 @@ fun OrderConfirmScreen(
         when (orderState) {
             is UiState.Success -> {
                 context.showToast("주문이 체결되었습니다")
+                // 주문 후 포트폴리오 갱신
+                // 사용자의 UID는 authViewModel.uid에 저장되어 있음
+                authViewModel.uid?.let { uid ->
+                    portfolioViewModel.loadPortfolio(uid)
+                }
+                // 주문 상태 초기화
                 orderViewModel.resetOrderState()
                 onOrderSuccess()
             }

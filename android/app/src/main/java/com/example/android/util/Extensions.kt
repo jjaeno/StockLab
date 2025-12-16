@@ -184,16 +184,16 @@ object StockData {
         Stock("005380", "현대차"),
         Stock("000270", "기아"),
         Stock("068270", "셀트리온"),
-        Stock("012330", "현대모비스"),
-        Stock("105560", "KB금융"),
-        Stock("055550", "신한지주"),
-        Stock("017670", "SK텔레콤"),
-        Stock("066570", "LG전자"),
-        Stock("015760", "한국전력"),
-        Stock("009150", "삼성전기"),
-        Stock("003550", "LG"),
-        Stock("096770", "SK이노베이션"),
-        Stock("034020", "두산에너빌리티")
+//        Stock("012330", "현대모비스"),
+//        Stock("105560", "KB금융"),
+//        Stock("055550", "신한지주"),
+//        Stock("017670", "SK텔레콤"),
+//        Stock("066570", "LG전자"),
+//        Stock("015760", "한국전력"),
+//        Stock("009150", "삼성전기"),
+//        Stock("003550", "LG"),
+//        Stock("096770", "SK이노베이션"),
+//        Stock("034020", "두산에너빌리티")
     )
 
     val overseasStocks = listOf(
@@ -207,16 +207,16 @@ object StockData {
         Stock("NFLX", "Netflix", "NASDAQ"),
         Stock("AMD", "AMD", "NASDAQ"),
         Stock("INTC", "Intel", "NASDAQ"),
-        Stock("QCOM", "Qualcomm", "NASDAQ"),
-        Stock("AVGO", "Broadcom", "NASDAQ"),
-        Stock("CSCO", "Cisco", "NASDAQ"),
-        Stock("ORCL", "Oracle", "NYSE"),
-        Stock("IBM", "IBM", "NYSE"),
-        Stock("JPM", "JPMorgan", "NYSE"),
-        Stock("BAC", "Bank of America", "NYSE"),
-        Stock("WMT", "Walmart", "NYSE"),
-        Stock("DIS", "Disney", "NYSE"),
-        Stock("V", "Visa", "NYSE")
+//        Stock("QCOM", "Qualcomm", "NASDAQ"),
+//        Stock("AVGO", "Broadcom", "NASDAQ"),
+//        Stock("CSCO", "Cisco", "NASDAQ"),
+//        Stock("ORCL", "Oracle", "NYSE"),
+//        Stock("IBM", "IBM", "NYSE"),
+//        Stock("JPM", "JPMorgan", "NYSE"),
+//        Stock("BAC", "Bank of America", "NYSE"),
+//        Stock("WMT", "Walmart", "NYSE"),
+//        Stock("DIS", "Disney", "NYSE"),
+//        Stock("V", "Visa", "NYSE")
     )
 
     // 심볼 → 이름 매핑 맵

@@ -27,6 +27,8 @@ class MainViewModel @Inject constructor(
 ) : ViewModel() {
 
     private var currentUid: String? = null
+    private var watchlistRefreshJob: Job? = null
+    private var allStocksRefreshJob: Job? = null
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -75,9 +77,13 @@ class MainViewModel @Inject constructor(
         if (currentUid == uid && _watchlist.value.isNotEmpty()) return
         currentUid = uid
 
-        // 초기 로드 + 자동 갱신 시작
+        // 1) 초기 1회 로드
+        loadAllStockQuotes()
         loadWatchlistWithQuotes()
-        startPeriodicRefresh()
+
+        // 2) 주기 갱신 시작
+        startAllStocksRefresh()
+        startWatchlistRefresh()
     }
 
     /**
@@ -106,9 +112,7 @@ class MainViewModel @Inject constructor(
                                     when (quotesResult) {
                                         is ApiResult.Success -> {
                                             // 4. Map으로 변환하여 저장
-                                            val quotesMap = quotesResult.data.associateBy {
-                                                "${it.market}_${it.quote.symbol}"
-                                            }
+                                            val quotesMap = quotesResult.data.associateBy { it.quote.symbol }
                                             _watchlistQuotes.value = quotesMap
                                         }
                                         is ApiResult.Error -> {
@@ -169,7 +173,7 @@ class MainViewModel @Inject constructor(
                     when (result) {
                         is ApiResult.Success -> {
                             result.data.forEach { quote ->
-                                quotes["${quote.market}_${quote.quote.symbol}"] = quote
+                                quotes[quote.quote.symbol] = quote
                             }
                             _allStockQuotes.value = quotes
                         }
@@ -179,6 +183,51 @@ class MainViewModel @Inject constructor(
             }
         }
     }
+    private fun loadAllStockQuotes() {
+        viewModelScope.launch {
+            val symbols = _allStocks.value.joinToString(",") { it.symbol }
+            if (symbols.isBlank()) return@launch
+
+            repository.getMultipleQuotes(symbols).collect { result ->
+                when (result) {
+                    is ApiResult.Success -> {
+                        // 모든 종목 시세 Map (key = symbol)
+                        val quotesMap = result.data.associateBy { it.quote.symbol }
+                        _allStockQuotes.value = quotesMap
+                    }
+
+                    is ApiResult.Error -> {
+                        // 에러 발생 시 기존 데이터 유지 + 에러 메시지 세팅
+                        _errorMessage.value =
+                            result.message ?: "전체 종목 시세를 불러오지 못했습니다."
+                    }
+
+                    is ApiResult.Loading -> {
+                        // 전체 종목은 로딩 상태를 굳이 UI에 반영하지 않음
+                    }
+                }
+            }
+        }
+    }
+    private fun startAllStocksRefresh() {
+        allStocksRefreshJob?.cancel()
+        allStocksRefreshJob = viewModelScope.launch {
+            while (isActive) {
+                loadAllStockQuotes()
+                delay(300_000L) // 5분
+            }
+        }
+    }
+    private fun startWatchlistRefresh() {
+        watchlistRefreshJob?.cancel()
+        watchlistRefreshJob = viewModelScope.launch {
+            while (isActive) {
+                loadWatchlistWithQuotes()
+                delay(10_000L) // 10초
+            }
+        }
+    }
+
 
     fun addToWatchlist(symbol: String, exchange: String? = null) {
         val uid = currentUid ?: return
@@ -244,6 +293,7 @@ class MainViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        refreshJob?.cancel()
+        watchlistRefreshJob?.cancel()
+        allStocksRefreshJob?.cancel()
     }
 }

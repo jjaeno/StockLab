@@ -11,7 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-
+import java.time.Duration;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -140,7 +140,7 @@ public class KisOverseasQuoteService {
                 .header("custtype", "P")
                 .retrieve()
                 .bodyToMono(String.class)
-                .block();
+                .block(Duration.ofSeconds(3)); //3초 타임아웃
 
         return parseOverseasQuoteResponse(symbol, exchange, response);
     }
