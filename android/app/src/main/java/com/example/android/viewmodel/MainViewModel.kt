@@ -7,15 +7,19 @@ import com.example.android.data.model.*
 import com.example.android.data.repository.StockLabRepository
 import com.example.android.util.StockData
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * 메인 화면 ViewModel (완전 개선)
- * - 전체 종목 시세 조회
- * - 관심종목 관리
- * - 검색 기능
+ * 메인 화면 ViewModel (개선 ver. - API 호출 최적화)
+ *
+ * 1. 관심종목 + 시세를 한 번에 로드 (다중 조회 API 사용)
+ * 2. 10초 주기로 자동 갱신
+ * 3. UI에서는 API 호출 없이 StateFlow만 구독
  */
 @HiltViewModel
 class MainViewModel @Inject constructor(
@@ -27,9 +31,11 @@ class MainViewModel @Inject constructor(
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
+    // 관심종목 리스트
     private val _watchlist = MutableStateFlow<List<WatchlistItem>>(emptyList())
     val watchlist: StateFlow<List<WatchlistItem>> = _watchlist.asStateFlow()
 
+    // 관심종목 시세 (Map<Symbol, Quote>)
     private val _watchlistQuotes = MutableStateFlow<Map<String, UnifiedQuoteResponse>>(emptyMap())
     val watchlistQuotes: StateFlow<Map<String, UnifiedQuoteResponse>> = _watchlistQuotes.asStateFlow()
 
@@ -39,7 +45,7 @@ class MainViewModel @Inject constructor(
     private val _allStocks = MutableStateFlow<List<StockData.Stock>>(emptyList())
     val allStocks: StateFlow<List<StockData.Stock>> = _allStocks.asStateFlow()
 
-    // 전체 종목 시세 (새로 추가)
+    // 전체 종목 시세 (상위 10개만)
     private val _allStockQuotes = MutableStateFlow<Map<String, UnifiedQuoteResponse>>(emptyMap())
     val allStockQuotes: StateFlow<Map<String, UnifiedQuoteResponse>> = _allStockQuotes.asStateFlow()
 
@@ -48,6 +54,9 @@ class MainViewModel @Inject constructor(
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
+    // 자동 갱신 Job
+    private var refreshJob: Job? = null
 
     init {
         _allStocks.value = StockData.getAllStocks()
@@ -60,113 +69,112 @@ class MainViewModel @Inject constructor(
                     performSearch(query)
                 }
         }
-
-        // 전체 종목 시세 로드 (일부만)
-        loadAllStockQuotes()
     }
 
     fun setUid(uid: String) {
         if (currentUid == uid && _watchlist.value.isNotEmpty()) return
         currentUid = uid
-        loadWatchlist()
+
+        // 초기 로드 + 자동 갱신 시작
+        loadWatchlistWithQuotes()
+        startPeriodicRefresh()
     }
 
     /**
-     * 관심종목 목록 로드
+     * 핵심 메서드: 관심종목 + 시세 한 번에 로드
      */
-    fun loadWatchlist() {
+    private fun loadWatchlistWithQuotes() {
         val uid = currentUid ?: return
 
         viewModelScope.launch {
-            repository.getWatchlist(uid).collect { result ->
-                when (result) {
-                    is ApiResult.Success -> {
-                        _watchlist.value = result.data.items
-                        loadWatchlistQuotes()
-                    }
-                    is ApiResult.Error -> {
-                        _errorMessage.value = result.message
-                        _isLoading.value = false
-                    }
-                    is ApiResult.Loading -> {
-                        _isLoading.value = true
-                    }
-                }
-            }
-        }
-    }
+            _isLoading.value = true
 
-    /**
-     * 관심종목 시세 조회
-     */
-    private fun loadWatchlistQuotes() {
-        val items = _watchlist.value
-
-        if (items.isEmpty()) {
-            _watchlistQuotes.value = emptyMap()
-            _isLoading.value = false
-            return
-        }
-
-        viewModelScope.launch {
-            val quotes = mutableMapOf<String, UnifiedQuoteResponse>()
-
-            items.forEach { item ->
-                repository.getQuote(item.symbol, item.exchange).collect { result ->
+            try {
+                // 1. 관심종목 목록 조회
+                repository.getWatchlist(uid).collect { result ->
                     when (result) {
                         is ApiResult.Success -> {
-                            quotes[item.symbol] = result.data
-                            _watchlistQuotes.value = quotes.toMap()
+                            val items = result.data.items
+                            _watchlist.value = items
+
+                            if (items.isNotEmpty()) {
+                                // 2. 심볼 리스트 생성 (쉼표 구분)
+                                val symbols = items.joinToString(",") { it.symbol }
+
+                                // 3. 다중 시세 조회 (단일 API 호출!)
+                                repository.getMultipleQuotes(symbols).collect { quotesResult ->
+                                    when (quotesResult) {
+                                        is ApiResult.Success -> {
+                                            // 4. Map으로 변환하여 저장
+                                            val quotesMap = quotesResult.data.associateBy {
+                                                "${it.market}_${it.quote.symbol}"
+                                            }
+                                            _watchlistQuotes.value = quotesMap
+                                        }
+                                        is ApiResult.Error -> {
+                                            _errorMessage.value = quotesResult.message
+                                        }
+                                        is ApiResult.Loading -> {}
+                                    }
+                                }
+                            } else {
+                                // 관심종목이 없으면 빈 맵
+                                _watchlistQuotes.value = emptyMap()
+                            }
                         }
-                        is ApiResult.Error -> {}
+                        is ApiResult.Error -> {
+                            _errorMessage.value = result.message
+                        }
                         is ApiResult.Loading -> {}
                     }
                 }
+            } finally {
+                _isLoading.value = false
             }
-
-            _isLoading.value = false
         }
     }
 
     /**
-     * 전체 종목 시세 조회 (일부만 - 상위 10개)
+     * 10초마다 자동 갱신
      */
-    private fun loadAllStockQuotes() {
+    private fun startPeriodicRefresh() {
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
+            while (isActive) {
+                delay(10_000L) // 10초
+                loadWatchlistWithQuotes()
+            }
+        }
+    }
+
+    /**
+     * 수동 새로고침 (SwipeRefresh용)
+     */
+    fun refresh() {
+        loadWatchlistWithQuotes()
+        loadTopStockQuotes()
+    }
+
+    /**
+     * 전체 종목 상위 10개 시세 조회 (초기 로드용)
+     */
+    private fun loadTopStockQuotes() {
         viewModelScope.launch {
             val quotes = mutableMapOf<String, UnifiedQuoteResponse>()
-
-            // 상위 10개 종목만 조회 (API 부하 방지)
             val topStocks = _allStocks.value.take(10)
 
-            topStocks.forEach { stock ->
-                repository.getQuote(stock.symbol, null).collect { result ->
+            val symbols = topStocks.joinToString(",") { it.symbol }
+            if (symbols.isNotEmpty()) {
+                repository.getMultipleQuotes(symbols).collect { result ->
                     when (result) {
                         is ApiResult.Success -> {
-                            quotes[stock.symbol] = result.data
-                            _allStockQuotes.value = quotes.toMap()
+                            result.data.forEach { quote ->
+                                quotes["${quote.market}_${quote.quote.symbol}"] = quote
+                            }
+                            _allStockQuotes.value = quotes
                         }
-                        is ApiResult.Error -> {}
-                        is ApiResult.Loading -> {}
+                        else -> {}
                     }
-                }
-            }
-        }
-    }
-
-    /**
-     * 특정 종목 시세 조회 (필요 시)
-     */
-    fun loadQuoteForStock(symbol: String) {
-        viewModelScope.launch {
-            repository.getQuote(symbol, null).collect { result ->
-                when (result) {
-                    is ApiResult.Success -> {
-                        val currentQuotes = _allStockQuotes.value.toMutableMap()
-                        currentQuotes[symbol] = result.data
-                        _allStockQuotes.value = currentQuotes
-                    }
-                    is ApiResult.Error -> {}
-                    is ApiResult.Loading -> {}
                 }
             }
         }
@@ -179,7 +187,8 @@ class MainViewModel @Inject constructor(
             repository.addToWatchlist(uid, symbol, exchange).collect { result ->
                 when (result) {
                     is ApiResult.Success -> {
-                        loadWatchlist()
+                        // 추가 후 즉시 갱신
+                        loadWatchlistWithQuotes()
                     }
                     is ApiResult.Error -> {
                         _errorMessage.value = result.message
@@ -199,7 +208,8 @@ class MainViewModel @Inject constructor(
             repository.removeFromWatchlist(uid, symbol, exchange).collect { result ->
                 when (result) {
                     is ApiResult.Success -> {
-                        loadWatchlist()
+                        // 삭제 후 즉시 갱신
+                        loadWatchlistWithQuotes()
                     }
                     is ApiResult.Error -> {
                         _errorMessage.value = result.message
@@ -228,16 +238,12 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    fun getQuote(symbol: String, exchange: String? = null): Flow<ApiResult<UnifiedQuoteResponse>> {
-        return repository.getQuote(symbol, exchange)
-    }
-
     fun clearError() {
         _errorMessage.value = null
     }
 
-    fun refresh() {
-        loadWatchlist()
-        loadAllStockQuotes()
+    override fun onCleared() {
+        super.onCleared()
+        refreshJob?.cancel()
     }
 }

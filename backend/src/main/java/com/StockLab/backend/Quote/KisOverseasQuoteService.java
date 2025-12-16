@@ -90,45 +90,59 @@ public class KisOverseasQuoteService {
         log.debug("해외주식 시세 조회: {} - {}", symbol, exchange);
         
         try {
-            String accessToken = tokenManager.getAccessToken();
-            String exchangeCode = getExchangeCode(exchange);
-            
-            // 심볼 정리
-            String cleanSymbol = cleanSymbol(symbol);
-            
-            // API 호출
-            String response = webClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path("/uapi/overseas-price/v1/quotations/price")
-                            .queryParam("AUTH", "")
-                            .queryParam("EXCD", exchangeCode)     // 거래소 코드
-                            .queryParam("SYMB", cleanSymbol)      // 종목 심볼
-                            .build())
-                    .header("Content-Type", "application/json; charset=utf-8")
-                    .header("authorization", "Bearer " + accessToken)
-                    .header("appkey", appKey)
-                    .header("appsecret", appSecret)
-                    .header("tr_id", TR_ID_OVERSEAS_PRICE)
-                    .header("custtype", "P")
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .block();
-            
-            // 응답 파싱
-            QuoteDto.QuoteResponse quote = parseOverseasQuoteResponse(symbol, exchange, response);
-            
-            // 캐시 저장
+            QuoteDto.QuoteResponse quote = requestOverseasQuoteInternal(symbol, exchange);
             quoteCache.put(cacheKey, quote);
-            
             log.info("해외주식 시세 조회 성공: {} ({}) - ${}",
                     symbol, exchange, quote.getCurrentPrice());
             return quote;
             
-        } catch (Exception e) {
-            log.error("해외주식 시세 조회 실패: {} - {}", symbol, e.getMessage());
-            throw new BusinessException(ErrorCode.QUOTE_NOT_FOUND,
-                    "해외주식 시세 조회 실패: " + symbol);
+        } catch (Exception primaryException) {
+            if (!"NASDAQ".equalsIgnoreCase(exchange)) {
+                log.error("해외주식 시세 조회 실패: {} - {}", symbol, primaryException.getMessage());
+                throw new BusinessException(ErrorCode.QUOTE_NOT_FOUND,
+                        "해외주식 시세 조회 실패: " + symbol);
+            }
+
+            log.warn("NASDAQ 조회 실패, NYSE로 재시도: {}", symbol);
+            try {
+                QuoteDto.QuoteResponse quote = requestOverseasQuoteInternal(symbol, "NYSE");
+                quoteCache.put(cacheKey, quote);
+                quoteCache.put("NYSE:" + symbol, quote);
+                log.info("해외주식 시세 조회 성공(대체 거래소): {} ({}) - ${}",
+                        symbol, "NYSE", quote.getCurrentPrice());
+                return quote;
+            } catch (Exception fallbackException) {
+                log.error("해외주식 시세 조회 실패(재시도 포함): {} - {}", symbol, fallbackException.getMessage());
+                throw new BusinessException(ErrorCode.QUOTE_NOT_FOUND,
+                        "해외주식 시세 조회 실패: " + symbol);
+            }
         }
+    }
+
+    private QuoteDto.QuoteResponse requestOverseasQuoteInternal(String symbol, String exchange) {
+        String accessToken = tokenManager.getAccessToken();
+        String exchangeCode = getExchangeCode(exchange);
+
+        String cleanSymbol = cleanSymbol(symbol);
+
+        String response = webClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/uapi/overseas-price/v1/quotations/price")
+                        .queryParam("AUTH", "")
+                        .queryParam("EXCD", exchangeCode)
+                        .queryParam("SYMB", cleanSymbol)
+                        .build())
+                .header("Content-Type", "application/json; charset=utf-8")
+                .header("authorization", "Bearer " + accessToken)
+                .header("appkey", appKey)
+                .header("appsecret", appSecret)
+                .header("tr_id", TR_ID_OVERSEAS_PRICE)
+                .header("custtype", "P")
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
+
+        return parseOverseasQuoteResponse(symbol, exchange, response);
     }
     
     /**
@@ -200,10 +214,18 @@ public class KisOverseasQuoteService {
      */
     public List<QuoteDto.QuoteResponse> getOverseasQuotes(List<OverseasStockRequest> requests) {
         log.info("해외주식 다중 조회: {} 건", requests.size());
-        
+
         return requests.stream()
-                .map(req -> getOverseasQuote(req.getSymbol(), req.getExchange()))
-                .collect(Collectors.toList());
+                .map(req -> {
+                    try {
+                        return getOverseasQuote(req.getSymbol(), req.getExchange());
+                    } catch (Exception e) {
+                        log.warn("해외주식 조회 스킵: {}", req.getSymbol());
+                        return null;
+                    }
+                })
+                .filter(Objects::nonNull)
+                .toList();
     }
     
     /**
@@ -364,10 +386,10 @@ public class KisOverseasQuoteService {
             }
 
             //필수 값 파싱 (없으면 0으로 기본 처리)
-            BigDecimal currentPrice  = new BigDecimal(output.path("last").asText("0"));
-            BigDecimal diff          = new BigDecimal(output.path("diff").asText("0"));
-            BigDecimal percentChange = new BigDecimal(output.path("rate").asText("0"));
-            BigDecimal previousClose = new BigDecimal(output.path("base").asText("0"));
+            BigDecimal currentPrice  = parseOverseasBigDecimal(output.path("last").asText(null));
+            BigDecimal diff          = parseOverseasBigDecimal(output.path("diff").asText(null));
+            BigDecimal percentChange = parseOverseasBigDecimal(output.path("rate").asText(null));
+            BigDecimal previousClose = parseOverseasBigDecimal(output.path("base").asText(null));
 
             // 전일 대비 부호 확인 (5/4: 하락)
             String sign = output.path("sign").asText("3"); // 3: 보합 가정
@@ -402,7 +424,31 @@ public class KisOverseasQuoteService {
             throw new BusinessException(ErrorCode.API_ERROR, "해외주식 데이터 파싱 실패");
         }
     }
-    
+    /**
+     * BigDecimal 안전 파싱 (공백/빈 문자열/"--" 포함)
+     */
+    private BigDecimal parseOverseasBigDecimal(String rawValue) {
+        if (rawValue == null) {
+            return BigDecimal.ZERO;
+        }
+        try {
+            String value = rawValue.trim();
+            if (value.isEmpty() || value.equals("--")) {
+                return BigDecimal.ZERO;
+            }
+            return new BigDecimal(value);
+        } catch (Exception e) {
+            return BigDecimal.ZERO;
+        }
+    }
+    /**
+     * BigDecimal 안전 파싱 (오류 시 0 반환)
+     */
+    private BigDecimal parseBigDecimalSafe(JsonNode node) {
+        return parseOverseasBigDecimal(node == null || node.isNull() ? null : node.asText());
+    }
+
+
     /**
      * 조회 시작일 계산 (해외주식용)
      */

@@ -16,9 +16,15 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * 주문 실행 서비스 (KRW/USD 이중 화폐 지원)
+ * 
+ * 매도 시 보유 수량 0개 오류 해결:
+ *    - positions 테이블은 (uid, symbol)만으로 식별
+ *    - exchange 파라미터는 시세 조회용일 뿐, 포지션 조회에는 불필요
+ *    - 디버깅 로그 추가로 원인 추적 가능
  */
 @Service
 @RequiredArgsConstructor
@@ -116,23 +122,58 @@ public class OrderService {
     }
     
     /**
-     * 매도 주문 처리 (통화별)
+     * 매도 주문 처리 (수정 버전 - 디버깅 로그 추가)
      */
     private OrderDto.OrderResponse processSellOrder(String uid, OrderDto.OrderRequest request,
                                                     BigDecimal price, UserEntity.Currency currency) {
-        // 보유 수량 확인
-        PositionEntity position = positionRepository
-                .findByUidAndSymbol(uid, request.getSymbol())
-                .orElseThrow(() -> {
-                    log.warn("보유하지 않은 종목: {}", request.getSymbol());
-                    return new BusinessException(ErrorCode.POSITION_NOT_FOUND);
-                });
+        // 디버깅 로그 시작
+        log.info("=== 매도 요청 디버깅 시작 ===");
+        log.info("UID: {}", uid);
+        log.info("요청 심볼: {}", request.getSymbol());
+        log.info("요청 exchange: {}", request.getExchange());
+        log.info("요청 수량: {}", request.getQuantity());
+        log.info("요청 가격: {}", price);
+        log.info("통화: {}", currency);
         
+        // 현재 보유 종목 전체 조회 (디버깅용)
+        List<PositionEntity> allPositions = positionRepository.findByUid(uid);
+        log.info("보유 종목 총 {}개:", allPositions.size());
+        for (PositionEntity p : allPositions) {
+            log.info("  - {} : {}주 (평균가: {})", 
+                    p.getSymbol(), p.getQuantity(), p.getAvgPrice());
+        }
+        
+        // 보유 수량 확인 (exchange 조건 없이 symbol만으로 조회)
+        // positions 테이블에는 exchange 컬럼이 없음!
+        Optional<PositionEntity> positionOpt = positionRepository
+                .findByUidAndSymbol(uid, request.getSymbol());
+        
+        log.info("조회 결과: {}", positionOpt.isPresent() ? "찾음 ✅" : "없음 ❌");
+        
+        if (positionOpt.isEmpty()) {
+            log.error("보유하지 않은 종목입니다!");
+            log.error("요청한 심볼: {}", request.getSymbol());
+            log.error("보유 종목 심볼 리스트: {}", 
+                    allPositions.stream()
+                            .map(PositionEntity::getSymbol)
+                            .collect(Collectors.joining(", ")));
+            log.info("=== 매도 요청 디버깅 종료 (실패) ===");
+            throw new BusinessException(ErrorCode.POSITION_NOT_FOUND, 
+                    "보유하지 않은 종목: " + request.getSymbol());
+        }
+        
+        PositionEntity position = positionOpt.get();
+        log.info("찾은 포지션: {} - {}주", position.getSymbol(), position.getQuantity());
+        
+        // 수량 확인
         if (position.getQuantity().compareTo(request.getQuantity()) < 0) {
             log.warn("수량 부족: 보유 {}주, 매도 요청 {}주",
                     position.getQuantity(), request.getQuantity());
+            log.info("=== 매도 요청 디버깅 종료 (수량 부족) ===");
             throw new BusinessException(ErrorCode.INSUFFICIENT_QUANTITY);
         }
+        
+        log.info("=== 매도 요청 디버깅 종료 (성공) ===");
         
         UserEntity user = authService.getUserByUid(uid);
         BigDecimal totalProceeds = price.multiply(request.getQuantity());
@@ -294,7 +335,7 @@ public class OrderService {
     }
     
     /**
-     * 국내주식 여부 판단
+     * 국내주식 여부 판단 (6자리 숫자)
      */
     private boolean isDomesticStock(String symbol) {
         return symbol.matches("\\d{6}");

@@ -27,9 +27,11 @@ import com.example.android.viewmodel.AuthViewModel
 import com.example.android.viewmodel.MainViewModel
 
 /**
- * 메인 화면 (완전 개선)
- * - 관심종목 섹션 (맨 위)
- * - 전체 종목 리스트 (가격변동 + 관심종목 토글 버튼)
+ * 메인 화면 (API 호출 최적화 완료)
+ *
+ *  UI에서는 API 호출 없음 - StateFlow만 구독
+ *  ViewModel에서 10초마다 자동 갱신
+ *  스크롤해도 추가 네트워크 호출 없음
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,6 +43,8 @@ fun MainScreen(
 ) {
     val context = LocalContext.current
     val authResponse by authViewModel.authResponse.collectAsState()
+
+    //  StateFlow 구독만
     val watchlist by mainViewModel.watchlist.collectAsState()
     val watchlistQuotes by mainViewModel.watchlistQuotes.collectAsState()
     val searchQuery by mainViewModel.searchQuery.collectAsState()
@@ -50,6 +54,7 @@ fun MainScreen(
     val isLoading by mainViewModel.isLoading.collectAsState()
     val errorMessage by mainViewModel.errorMessage.collectAsState()
 
+    // UID 설정 (한 번만)
     LaunchedEffect(authResponse?.uid) {
         authResponse?.uid?.let { uid ->
             mainViewModel.setUid(uid)
@@ -127,7 +132,10 @@ fun MainScreen(
                         )
                     }
 
-                    items(searchResults) { stock ->
+                    items(
+                        items = searchResults,
+                        key = { "search_${it.market}_${it.symbol}" }
+                        ) { stock ->
                         SearchResultItem(
                             stock = stock,
                             onClick = {
@@ -191,8 +199,12 @@ fun MainScreen(
                             EmptyWatchlistCard()
                         }
                     } else {
-                        items(watchlist) { item ->
-                            val quote = watchlistQuotes[item.symbol]
+                        // 관심종목 표시 (API 호출 없음!)
+                        items(
+                            items = watchlist,
+                            key = { "${it.exchange ?: "NONE"}_${it.symbol}" }
+                        ) { item ->
+                            val quote = watchlistQuotes["${item.exchange ?: "NONE"}_${item.symbol}"]
                             val stockName = item.getDisplayName()
                             val isInWatchlist = true
 
@@ -248,8 +260,11 @@ fun MainScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                     }
 
-                    items(allStocks) { stock ->
-                        val quote = allStockQuotes[stock.symbol]
+                    items(
+                        items = allStocks,
+                        key = { "${it.market}_${it.symbol}" }
+                    ) { stock ->
+                        val quote = allStockQuotes["${stock.market}_${stock.symbol}"]
                         val isInWatchlist = watchlist.any { it.symbol == stock.symbol }
 
                         EnhancedStockItemCard(
@@ -291,7 +306,7 @@ fun MainScreen(
 }
 
 /**
- * 개선된 종목 아이템 카드 (가격변동 + 관심종목 토글)
+ * 개선된 종목 카드 (API 호출 제거)
  */
 @Composable
 private fun EnhancedStockItemCard(
