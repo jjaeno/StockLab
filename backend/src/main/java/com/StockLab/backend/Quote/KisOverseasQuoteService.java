@@ -215,18 +215,40 @@ public class KisOverseasQuoteService {
     public List<QuoteDto.QuoteResponse> getOverseasQuotes(List<OverseasStockRequest> requests) {
         log.info("해외주식 다중 조회: {} 건", requests.size());
 
-        return requests.stream()
-                .map(req -> {
-                    try {
-                        return getOverseasQuote(req.getSymbol(), req.getExchange());
-                    } catch (Exception e) {
-                        log.warn("해외주식 조회 스킵: {}", req.getSymbol());
-                        return null;
-                    }
-                })
-                .filter(Objects::nonNull)
-                .toList();
+        List<QuoteDto.QuoteResponse> results = new ArrayList<>();
+
+        int batchSize = 5;
+        long batchDelayMs = 3000L;
+
+        for (int i = 0; i < requests.size(); i += batchSize) {
+            List<OverseasStockRequest> batch =
+                    requests.subList(i, Math.min(i + batchSize, requests.size()));
+
+            for (OverseasStockRequest req : batch) {
+                try {
+                    QuoteDto.QuoteResponse quote =
+                            getOverseasQuote(req.getSymbol(), req.getExchange());
+                    results.add(quote);
+                } catch (Exception e) {
+                    log.warn("해외주식 조회 스킵: {}", req.getSymbol());
+                }
+            }
+
+            // 마지막 batch가 아니면 delay
+            if (i + batchSize < requests.size()) {
+                try {
+                    log.debug("해외주식 batch 처리 완료, {}ms 대기", batchDelayMs);
+                    Thread.sleep(batchDelayMs);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+
+        return results;
     }
+
     
     /**
      * 미국 주요 종목 시세 조회 (편의 메서드)
