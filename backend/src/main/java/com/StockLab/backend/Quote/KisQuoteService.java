@@ -16,6 +16,7 @@ import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 한국투자증권 Open API 시세 조회 서비스
@@ -29,6 +30,9 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 public class KisQuoteService {
+
+    private final AtomicLong lastDomesticCallTime = new AtomicLong(0);
+    private static final long MIN_CALL_INTERVAL_MS = 200; // 국내: 200ms
     
     private final WebClient webClient;
     private final KisTokenManager tokenManager;
@@ -42,7 +46,25 @@ public class KisQuoteService {
     // TR_ID 상수 정의
     private static final String TR_ID_PRICE = "FHKST01010100";        // 국내주식 현재가 시세
     private static final String TR_ID_DAILY_CHART = "FHKST03010100";  // 국내주식 기간별 시세
-    
+
+    // 기타 TR_ID는 필요 시 추가
+    private synchronized void enforceRateLimit() {
+        long now = System.currentTimeMillis();
+        long elapsed = now - lastDomesticCallTime.get();
+        
+        if (elapsed < MIN_CALL_INTERVAL_MS) {
+            try {
+                long sleepTime = MIN_CALL_INTERVAL_MS - elapsed;
+                Thread.sleep(sleepTime);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        
+        lastDomesticCallTime.set(System.currentTimeMillis());
+    }
+
+    // 생성자
     public KisQuoteService(WebClient.Builder webClientBuilder,
                           @Value("${api.kis.base-url}") String baseUrl,
                           @Value("${api.kis.appkey}") String appKey,
@@ -73,6 +95,7 @@ public class KisQuoteService {
             log.debug("캐시 히트: {}", stockCode);
             return cached;
         }
+        enforceRateLimit(); // Rate Limit 준수
         
         log.debug("KIS API 호출 - 현재가 조회: {}", stockCode);
         
@@ -95,15 +118,19 @@ public class KisQuoteService {
                     .header("custtype", "P") //고객 구분(P: 개인)
                     .retrieve()
                     .bodyToMono(String.class)
-                    .block(Duration.ofSeconds(3)); //3초 타임아웃
+                    .block(Duration.ofSeconds(5)); //5초 타임아웃
             
             // 응답 파싱
             QuoteDto.QuoteResponse quote = parseQuoteResponse(stockCode, response);
             
-            // 캐시 저장
-            quoteCache.put(stockCode, quote);
+            // 유효한 가격인 경우에만 캐시에 저장
+            if (quote.getCurrentPrice().compareTo(BigDecimal.ZERO) > 0) {
+                quoteCache.put(stockCode, quote);
+                log.info("국내주식 캐시 저장: {} - {}원", stockCode, quote.getCurrentPrice());
+            } else {
+                log.warn("가격 0인 응답: {}", stockCode);
+            }
             
-            log.info("시세 조회 성공: {} - {}원", stockCode, quote.getCurrentPrice());
             return quote;
             
         } catch (Exception e) {

@@ -17,6 +17,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 /**
@@ -32,6 +33,9 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 public class KisOverseasQuoteService {
+
+    private final AtomicLong lastOverseasCallTime = new AtomicLong(0);
+    private static final long MIN_CALL_INTERVAL_MS = 500; // VTS: 500ms 강제 대기
     
     private final WebClient webClient;
     private final KisTokenManager tokenManager;
@@ -52,7 +56,28 @@ public class KisOverseasQuoteService {
         "NASDAQ", "NAS",    // 나스닥
         "AMEX", "AMS"       // 아멕스
     );
+
     
+     //VTS Rate Limit 준수 (synchronized로 동시 호출 방지)
+    private synchronized void enforceRateLimit() {
+        long now = System.currentTimeMillis();
+        long elapsed = now - lastOverseasCallTime.get();
+        
+        if (elapsed < MIN_CALL_INTERVAL_MS) {
+            try {
+                long sleepTime = MIN_CALL_INTERVAL_MS - elapsed;
+                log.debug("⏱️ VTS Rate Limit: {}ms 대기", sleepTime);
+                Thread.sleep(sleepTime);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Rate limit sleep interrupted");
+            }
+        }
+        
+        lastOverseasCallTime.set(System.currentTimeMillis());
+    }
+
+    // 생성자
     public KisOverseasQuoteService(WebClient.Builder webClientBuilder,
                                    @Value("${api.kis.base-url}") String baseUrl,
                                    @Value("${api.kis.appkey}") String appKey,
@@ -91,9 +116,14 @@ public class KisOverseasQuoteService {
         
         try {
             QuoteDto.QuoteResponse quote = requestOverseasQuoteInternal(symbol, exchange);
-            quoteCache.put(cacheKey, quote);
-            log.info("해외주식 시세 조회 성공: {} ({}) - ${}",
-                    symbol, exchange, quote.getCurrentPrice());
+            // 유효한 가격인 경우에만 캐시에 저장
+            if (quote.getCurrentPrice().compareTo(BigDecimal.ZERO) > 0) {
+                quoteCache.put(cacheKey, quote);
+                log.info("해외주식 캐시 저장: {} ({}) - ${}",
+                        symbol, exchange, quote.getCurrentPrice());
+            } else {
+                log.warn("0인 응답은 캐시하지 않음: {} ({})", symbol, exchange);
+            }
             return quote;
             
         } catch (Exception primaryException) {
@@ -104,15 +134,17 @@ public class KisOverseasQuoteService {
             }
 
             log.warn("NASDAQ 조회 실패, NYSE로 재시도: {}", symbol);
+
             try {
                 QuoteDto.QuoteResponse quote = requestOverseasQuoteInternal(symbol, "NYSE");
-                quoteCache.put(cacheKey, quote);
-                quoteCache.put("NYSE:" + symbol, quote);
-                log.info("해외주식 시세 조회 성공(대체 거래소): {} ({}) - ${}",
-                        symbol, "NYSE", quote.getCurrentPrice());
+                // 유효한 가격인 경우에만 캐시에 저장
+                if (quote.getCurrentPrice().compareTo(BigDecimal.ZERO) > 0) {
+                    quoteCache.put("NYSE:" + symbol, quote);
+                    log.info("NYSE 대체 성공: {} - ${}", symbol, quote.getCurrentPrice());
+                }
                 return quote;
             } catch (Exception fallbackException) {
-                log.error("해외주식 시세 조회 실패(재시도 포함): {} - {}", symbol, fallbackException.getMessage());
+                log.error("NYSE도 실패: {} - {}", symbol, fallbackException.getMessage());
                 throw new BusinessException(ErrorCode.QUOTE_NOT_FOUND,
                         "해외주식 시세 조회 실패: " + symbol);
             }
@@ -120,6 +152,8 @@ public class KisOverseasQuoteService {
     }
 
     private QuoteDto.QuoteResponse requestOverseasQuoteInternal(String symbol, String exchange) {
+        enforceRateLimit(); // VTS Rate Limit 준수
+
         String accessToken = tokenManager.getAccessToken();
         String exchangeCode = getExchangeCode(exchange);
 
@@ -140,7 +174,7 @@ public class KisOverseasQuoteService {
                 .header("custtype", "P")
                 .retrieve()
                 .bodyToMono(String.class)
-                .block(Duration.ofSeconds(3)); //3초 타임아웃
+                .block(Duration.ofSeconds(5)); //5초 타임아웃
 
         return parseOverseasQuoteResponse(symbol, exchange, response);
     }
@@ -409,6 +443,13 @@ public class KisOverseasQuoteService {
 
             //필수 값 파싱 (없으면 0으로 기본 처리)
             BigDecimal currentPrice  = parseOverseasBigDecimal(output.path("last").asText(null));
+            // 가격 유효성 검사
+            if (currentPrice.compareTo(BigDecimal.ZERO) <= 0) {
+                log.error("가격이 0 또는 음수: symbol={}, exchange={}, last={}",
+                        symbol, exchange, output.path("last").asText());
+                throw new BusinessException(ErrorCode.QUOTE_NOT_FOUND,
+                        "유효하지 않은 가격 데이터 (0원)");
+            }
             BigDecimal diff          = parseOverseasBigDecimal(output.path("diff").asText(null));
             BigDecimal percentChange = parseOverseasBigDecimal(output.path("rate").asText(null));
             BigDecimal previousClose = parseOverseasBigDecimal(output.path("base").asText(null));

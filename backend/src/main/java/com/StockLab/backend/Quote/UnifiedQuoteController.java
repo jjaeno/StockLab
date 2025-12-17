@@ -94,49 +94,94 @@ public class UnifiedQuoteController {
      * 국내주식과 해외주식을 섞어서 사용 가능
      */
     @GetMapping
-    @Operation(
-        summary = "다중 종목 시세 조회",
-        description = "쉼표로 구분하여 여러 종목을 한 번에 조회합니다.\n"
-    )
+    @Operation(summary = "다중 종목 시세 조회")
     public ApiResponse<List<UnifiedQuoteResponse>> getQuotes(
-            @RequestParam @Parameter(description = "쉼표로 구분된 종목 리스트", example = "005930,AAPL,TSLA") 
-            String symbols) {
+            @RequestParam String symbols) {
         
-        log.info("다중 조회: {}", symbols);
+        log.info("다중 조회 시작: {}", symbols);
         
-        List<UnifiedQuoteResponse> responses = new ArrayList<>();
+        String[] symbolArray = symbols.split(",");
+        List<String> domesticSymbols = new ArrayList<>();
+        List<String> overseasSymbols = new ArrayList<>();
         
-        for (String symbol : symbols.split(",")) {
+        // 국내/해외 분류
+        for (String symbol : symbolArray) {
             symbol = symbol.trim();
+            if (symbol.isEmpty()) continue;
             
-            try {
-                StockType stockType = detectStockType(symbol);
-                QuoteDto.QuoteResponse quote;
-                
-                switch (stockType) {
-                    case DOMESTIC:
-                        quote = domesticQuoteService.getQuote(symbol);
-                        Thread.sleep(50);      // 국내 주식 완충
-                        break;
-                    case OVERSEAS:
-                        quote = overseasQuoteService.getUsStock(symbol);
-                        Thread.sleep(200);     // 해외주식 (VTS 필수)
-                        break;
-                    default:
-                        continue;
-                }
-                
-                responses.add(UnifiedQuoteResponse.builder()
-                        .quote(quote)
-                        .stockType(stockType)
-                        .market(getMarketName(stockType))
-                        .currency(getCurrency(stockType))
-                        .build());
-                        
-            } catch (Exception e) {
-                log.warn("종목 조회 실패: {} - {}", symbol, e.getMessage());
+            StockType stockType = detectStockType(symbol);
+            if (stockType == StockType.DOMESTIC) {
+                domesticSymbols.add(symbol);
+            } else if (stockType == StockType.OVERSEAS) {
+                overseasSymbols.add(symbol);
             }
         }
+        
+        log.info("   국내: {}개, 해외: {}개", domesticSymbols.size(), overseasSymbols.size());
+        
+        List<UnifiedQuoteResponse> responses = new ArrayList<>();
+        int successCount = 0;
+        int failCount = 0;
+        
+        // ============ 국내 종목 처리 (Rate Limit 내장) ============
+        for (String symbol : domesticSymbols) {
+            try {
+                QuoteDto.QuoteResponse quote = domesticQuoteService.getQuote(symbol);
+                responses.add(UnifiedQuoteResponse.builder()
+                        .quote(quote)
+                        .stockType(StockType.DOMESTIC)
+                        .market(getMarketName(StockType.DOMESTIC))
+                        .currency(getCurrency(StockType.DOMESTIC))
+                        .build());
+                successCount++;
+            } catch (Exception e) {
+                log.warn("국내 종목 실패: {} - {}", symbol, e.getMessage());
+                failCount++;
+            }
+        }
+        
+        // ============ 해외 종목 처리 (배치 + 대기) ============
+        int batchSize = 2; // VTS: 한 번에 3개씩만 처리
+        for (int i = 0; i < overseasSymbols.size(); i += batchSize) {
+            List<String> batch = overseasSymbols.subList(
+                i, 
+                Math.min(i + batchSize, overseasSymbols.size())
+            );
+            
+            log.info("   해외 배치 {}/{} 처리 중...", (i / batchSize) + 1, 
+                    (overseasSymbols.size() + batchSize - 1) / batchSize);
+            
+            for (String symbol : batch) {
+                try {
+                    QuoteDto.QuoteResponse quote = overseasQuoteService.getUsStock(symbol);
+                    responses.add(UnifiedQuoteResponse.builder()
+                            .quote(quote)
+                            .stockType(StockType.OVERSEAS)
+                            .market(getMarketName(StockType.OVERSEAS))
+                            .currency(getCurrency(StockType.OVERSEAS))
+                            .build());
+                    successCount++;
+                } catch (Exception e) {
+                    log.warn("해외 종목 실패: {} - {}", symbol, e.getMessage());
+                    failCount++;
+                }
+            }
+            
+            // 배치 간 대기 (마지막 제외)
+            if (i + batchSize < overseasSymbols.size()) {
+                try {
+                    log.debug("⏱배치 간 2초 대기...");
+                    Thread.sleep(2000); // VTS: 배치 간 2초 대기
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.warn("배치 대기 중단됨");
+                    break;
+                }
+            }
+        }
+        
+        log.info("✅ 다중 조회 완료: 성공 {}/{}, 실패 {}", 
+                successCount, symbolArray.length, failCount);
         
         return ApiResponse.success(responses);
     }

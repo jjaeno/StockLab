@@ -25,6 +25,7 @@ import com.example.android.data.model.*
 import com.example.android.util.*
 import com.example.android.viewmodel.AuthViewModel
 import com.example.android.viewmodel.MainViewModel
+import android.util.Log
 
 /**
  * 메인 화면 (API 호출 최적화 완료)
@@ -54,10 +55,18 @@ fun MainScreen(
     val isLoading by mainViewModel.isLoading.collectAsState()
     val errorMessage by mainViewModel.errorMessage.collectAsState()
 
+    // remember로 한 번만 실행
+    val hasInitialized = remember { mutableStateOf(false) }
     // UID 설정 (한 번만)
     LaunchedEffect(authResponse?.uid) {
         authResponse?.uid?.let { uid ->
-            mainViewModel.setUid(uid)
+            if (!hasInitialized.value) {
+                Log.i("MainScreen","MainScreen 초기화: UID=$uid")
+                mainViewModel.setUid(uid)
+                hasInitialized.value = true
+            } else {
+                Log.d("MainScreen","⏭MainScreen 이미 초기화됨, 스킵")
+            }
         }
     }
 

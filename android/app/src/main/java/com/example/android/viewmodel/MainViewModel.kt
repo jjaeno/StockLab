@@ -214,7 +214,7 @@ class MainViewModel @Inject constructor(
         allStocksRefreshJob = viewModelScope.launch {
             while (isActive) {
                 loadAllStockQuotes()
-                delay(300_000L) // 5분
+                delay(600_000L) // 5분
             }
         }
     }
@@ -223,7 +223,7 @@ class MainViewModel @Inject constructor(
         watchlistRefreshJob = viewModelScope.launch {
             while (isActive) {
                 loadWatchlistWithQuotes()
-                delay(10_000L) // 10초
+                delay(30_000L) // 10초
             }
         }
     }
