@@ -147,11 +147,11 @@ public class KisOverseasQuoteService {
                 .transformDeferred(RateLimiterOperator.of(overseasRateLimiter))
                 .onErrorResume(e -> {
                     if ("NASDAQ".equalsIgnoreCase(exchange)) {
-                        log.warn("NASDAQ ?? ??, NYSE? ???: {}", symbol);
+                        log.warn("NASDAQ 실패, NYSE로 재시도: {}", symbol);
                         return getOverseasQuoteAsync(symbol, "NYSE");
                     }
-                    log.warn("???? ?? ?? skip: {} ({}) - {}", symbol, exchange, e.getMessage());
-                    return Mono.empty();
+                    log.warn("해외 시세 조회 실패 skip: {} ({}) - {}", symbol, exchange, e.getMessage());
+                    return Mono.error(e);
                 });
     }
 

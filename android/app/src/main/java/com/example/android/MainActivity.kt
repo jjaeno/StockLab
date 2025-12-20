@@ -145,7 +145,7 @@ fun MainNavigation(navController: NavHostController) {
                 )
             }
 
-            // 종목 상세 화면
+            // 종목
             composable(Route.DETAIL) {
                 val stockDetail = navController.previousBackStackEntry
                     ?.savedStateHandle
@@ -154,6 +154,7 @@ fun MainNavigation(navController: NavHostController) {
                 stockDetail?.let { detail ->
                     DetailScreen(
                         stockDetail = detail,
+                        navController = navController,
                         onNavigateBack = { navController.popBackStack() },
                         onNavigateToOrder = { symbol, side, price, exchange ->
                             navController.currentBackStackEntry?.savedStateHandle?.apply {
@@ -165,9 +166,9 @@ fun MainNavigation(navController: NavHostController) {
                             navController.navigate(Route.ORDER_CONFIRM)
                         }
                     )
+
                 }
             }
-
             // 주문 확인 화면
             composable(Route.ORDER_CONFIRM) {
                 val symbol = navController.previousBackStackEntry

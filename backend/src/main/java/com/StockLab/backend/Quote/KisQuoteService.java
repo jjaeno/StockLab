@@ -101,15 +101,11 @@ public class KisQuoteService {
      * 기존 동기 로직(getQuoteBlocking)을 재사용하며, blocking 호출은 boundedElastic에서 실행.
      */
     public Mono<QuoteDto.QuoteResponse> getQuoteAsync(String stockCode) {
-        return Mono.defer(() -> Mono.fromCallable(() -> getQuoteBlocking(stockCode)))
-                .publishOn(Schedulers.boundedElastic())
+        return Mono.fromCallable(() -> getQuoteBlocking(stockCode))
+                .subscribeOn(Schedulers.boundedElastic()) // ✅ block 호출을 반드시 boundedElastic에서
                 .transformDeferred(RateLimiterOperator.of(domesticRateLimiter))
-                .onErrorResume(e -> {
-                    log.warn("국내 시세 조회 실패 (skip): {} - {}", stockCode, e.getMessage());
-                    return Mono.empty();
-                });
+                .doOnError(e -> log.warn("국내 시세 조회 실패: {} - {}", stockCode, e.getMessage()));
     }
-
     /**
      * 동기 현재가 조회 본체 (기존 로직 유지)
      */

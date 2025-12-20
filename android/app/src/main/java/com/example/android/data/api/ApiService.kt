@@ -3,7 +3,8 @@ package com.example.android.data.api
 import com.example.android.data.model.*
 import retrofit2.Response
 import retrofit2.http.*
-
+import retrofit2.http.GET
+import retrofit2.http.Query
 /**
  * StockLab Retrofit API 인터페이스
  * 백엔드 API 엔드포인트와 1:1 매핑
@@ -174,6 +175,13 @@ interface ApiService {
         @Path("symbol") symbol: String,
         @Query("exchange") exchange: String? = null
     ): Response<ApiResponse<Void>>
+    /** 네이버 뉴스 검색 */
+    @GET("news/naver")
+    suspend fun getNaverNews(
+        @Query("symbol") symbol: String?,
+        @Query("displayName") displayName: String?,
+        @Query("limit") limit: Int = 5
+    ): Response<List<NewsArticle>>
 }
 
 /**

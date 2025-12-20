@@ -46,7 +46,7 @@ fun MainScreen(
     val context = LocalContext.current
     val authResponse by authViewModel.authResponse.collectAsState()
 
-    // ⭐ StateFlow 구독만
+    // StateFlow 구독만
     val watchlist by mainViewModel.watchlist.collectAsState()
     val watchlistQuotes by mainViewModel.watchlistQuotes.collectAsState()
     val searchQuery by mainViewModel.searchQuery.collectAsState()
@@ -276,16 +276,17 @@ fun MainScreen(
                         items = allStocks,
                         key = { "${it.market}_${it.symbol}" }
                     ) { stock ->
-                        val quote = allStockQuotes[stock.symbol]
+                        val quoteResult = allStockQuotes[stock.symbol]
                         val isInWatchlist = watchlist.any { it.symbol == stock.symbol }
 
-                        // 전체 종목은 기존 방식 유지 (UnifiedQuoteResponse)
-                        EnhancedStockItemCardOld(
+                        // 전체 종목도 관심종목과 동일한 카드 사용
+                        EnhancedStockItemCard(
                             symbol = stock.symbol,
                             name = stock.name,
-                            quote = quote,
+                            quoteResult = quoteResult,
                             isInWatchlist = isInWatchlist,
                             onClick = {
+                                // quoteResult?.data != null 일 때만 상세로 이동
                                 val stockType = if (stock.symbol.isDomesticStock())
                                     StockType.DOMESTIC else StockType.OVERSEAS
                                 val currency = if (stockType == StockType.DOMESTIC)
@@ -312,6 +313,7 @@ fun MainScreen(
                             }
                         )
                     }
+
                 }
             }
         }

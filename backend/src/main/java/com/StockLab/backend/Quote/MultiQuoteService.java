@@ -37,8 +37,8 @@ public class MultiQuoteService {
     private final KisOverseasQuoteService overseasQuoteService;
     private final LastKnownGoodCache lastKnownGoodCache;
     
-    private static final int CONCURRENCY_LIMIT = 5;
-    private static final Duration TIMEOUT_PER_QUOTE = Duration.ofSeconds(3);
+    private static final int CONCURRENCY_LIMIT = 3;
+    private static final Duration TIMEOUT_PER_QUOTE = Duration.ofSeconds(5);
     private static final int MAX_RETRY = 1;
     
     /**

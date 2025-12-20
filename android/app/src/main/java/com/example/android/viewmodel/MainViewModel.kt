@@ -55,8 +55,8 @@ class MainViewModel @Inject constructor(
     val allStocks: StateFlow<List<StockData.Stock>> = _allStocks.asStateFlow()
 
     // 전체 종목 시세 (상위 10개만)
-    private val _allStockQuotes = MutableStateFlow<Map<String, UnifiedQuoteResponse>>(emptyMap())
-    val allStockQuotes: StateFlow<Map<String, UnifiedQuoteResponse>> = _allStockQuotes.asStateFlow()
+    private val _allStockQuotes = MutableStateFlow<Map<String, QuoteResult>>(emptyMap())
+    val allStockQuotes: StateFlow<Map<String, QuoteResult>> = _allStockQuotes.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -94,7 +94,7 @@ class MainViewModel @Inject constructor(
         startPeriodicRefresh()
 
         // 전체 종목 시세
-        loadAllStockQuotes()
+        loadTopStockQuotes()
         startAllStocksRefresh()
     }
 
@@ -220,56 +220,74 @@ class MainViewModel @Inject constructor(
      */
     private fun loadTopStockQuotes() {
         viewModelScope.launch {
-            val quotes = mutableMapOf<String, UnifiedQuoteResponse>()
-            val topStocks = _allStocks.value.take(10)
+            val topStocks = _allStocks.value.take(15)
+            if (topStocks.isEmpty()) return@launch
 
-            val symbols = topStocks.joinToString(",") { it.symbol }
-            if (symbols.isNotEmpty()) {
-                repository.getMultipleQuotes(symbols).collect { result ->
-                    when (result) {
-                        is ApiResult.Success -> {
-                            result.data.forEach { quote ->
-                                quotes[quote.quote.symbol] = quote
-                            }
-                            _allStockQuotes.value = quotes
-                        }
-                        else -> {}
-                    }
-                }
-            }
-        }
-    }
-    private fun loadAllStockQuotes() {
-        viewModelScope.launch {
-            val symbols = _allStocks.value.joinToString(",") { it.symbol }
-            if (symbols.isBlank()) return@launch
+            val symbols = topStocks.map { it.symbol }
 
-            repository.getMultipleQuotes(symbols).collect { result ->
+            repository.getBatchQuotes(symbols).collect { result ->
                 when (result) {
                     is ApiResult.Success -> {
-                        // 모든 종목 시세 Map (key = symbol)
-                        val quotesMap = result.data.associateBy { it.quote.symbol }
+                        val batch = result.data
+                        // 응답 누락 검사
+                        if (batch.results.size != symbols.size) {
+                            Log.e(
+                                "MainViewModel",
+                                "❌ 전체 종목 batch 응답 누락: 요청 ${symbols.size}, 응답 ${batch.results.size}"
+                            )
+                        }
+                        // Map<symbol, QuoteResult> 로 변환
+                        val quotesMap = batch.results.associateBy { it.symbol }
+                        // 성공한 결과는 캐시에 저장
+                        batch.results.forEach { qr ->
+                            if (qr.status == ResultStatus.SUCCESS) {
+                                quoteCache.saveSuccess(qr.symbol, qr)
+                            }
+                        }
                         _allStockQuotes.value = quotesMap
                     }
-
                     is ApiResult.Error -> {
-                        // 에러 발생 시 기존 데이터 유지 + 에러 메시지 세팅
                         _errorMessage.value =
-                            result.message ?: "전체 종목 시세를 불러오지 못했습니다."
+                            result.message ?: "전체 종목 시세(batch)를 불러오지 못했습니다."
                     }
-
-                    is ApiResult.Loading -> {
-                        // 전체 종목은 로딩 상태를 굳이 UI에 반영하지 않음
-                    }
+                    // 로딩 상태는 UI에 굳이 반영하지 않음
+                    else -> {}
                 }
             }
         }
     }
+
+//    private fun loadAllStockQuotes() {
+//        viewModelScope.launch {
+//            val symbols = _allStocks.value.joinToString(",") { it.symbol }
+//            if (symbols.isBlank()) return@launch
+//
+//            repository.getMultipleQuotes(symbols).collect { result ->
+//                when (result) {
+//                    is ApiResult.Success -> {
+//                        // 모든 종목 시세 Map (key = symbol)
+//                        val quotesMap = result.data.associateBy { it.quote.symbol }
+//                        _allStockQuotes.value = quotesMap
+//                    }
+//
+//                    is ApiResult.Error -> {
+//                        // 에러 발생 시 기존 데이터 유지 + 에러 메시지 세팅
+//                        _errorMessage.value =
+//                            result.message ?: "전체 종목 시세를 불러오지 못했습니다."
+//                    }
+//
+//                    is ApiResult.Loading -> {
+//                        // 전체 종목은 로딩 상태를 굳이 UI에 반영하지 않음
+//                    }
+//                }
+//            }
+//        }
+//    }
     private fun startAllStocksRefresh() {
         allStocksRefreshJob?.cancel()
         allStocksRefreshJob = viewModelScope.launch {
             while (isActive) {
-                loadAllStockQuotes()
+                loadTopStockQuotes()
                 delay(600_000L) // 5분
             }
         }

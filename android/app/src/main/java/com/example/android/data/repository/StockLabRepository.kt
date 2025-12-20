@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.example.android.data.model.NewsArticle
 
 /**
  * StockLab Repository
@@ -22,6 +23,21 @@ import javax.inject.Singleton
 class StockLabRepository @Inject constructor(
     private val api: ApiService
 ) {
+    /** 네이버 뉴스 목록 가져오기 */
+    fun getNaverNews(symbol: String, displayName: String?): Flow<ApiResult<List<NewsArticle>>> = flow {
+        emit(ApiResult.Loading)
+        try {
+            val response = api.getNaverNews(symbol, displayName)
+            if (response.isSuccessful) {
+                emit(ApiResult.Success(response.body() ?: emptyList()))
+            } else {
+                emit(ApiResult.Error(response.message()))
+            }
+        } catch (e: Exception) {
+            emit(ApiResult.Error(e.localizedMessage ?: "Unknown error"))
+        }
+    }
+
 
     // ==========================================
     // 인증 API
@@ -196,6 +212,8 @@ class StockLabRepository @Inject constructor(
             emit(ApiResult.Error(e.localizedMessage ?: "네트워크 오류"))
         }
     }.flowOn(Dispatchers.IO)
+
+
 }
 
 /**

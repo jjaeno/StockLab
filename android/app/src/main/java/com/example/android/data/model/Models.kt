@@ -298,3 +298,11 @@ data class StockDetail(
     val stockType: StockType,
     val currency: Currency
 ) : Parcelable
+
+data class NewsArticle(
+    val title: String,
+    val summary: String,
+    val url: String,
+    val publishedAt: String,
+    val source: String
+)
