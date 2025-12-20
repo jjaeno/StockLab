@@ -100,11 +100,22 @@ class DetailViewModel @Inject constructor(
     private val _news = MutableStateFlow<ApiResult<List<NewsArticle>>>(ApiResult.Loading)
     val news: StateFlow<ApiResult<List<NewsArticle>>> = _news.asStateFlow()
 
+    private val _forecast = MutableStateFlow<ApiResult<GptForecastResponse>>(ApiResult.Loading)
+    val forecast: StateFlow<ApiResult<GptForecastResponse>> = _forecast.asStateFlow()
+
     /** 뉴스 로드 */
     fun loadNews(symbol: String, displayName: String?) {
         viewModelScope.launch {
             repository.getNaverNews(symbol, displayName).collect { result ->
                 _news.value = result
+            }
+        }
+    }
+
+    fun loadForecast(symbol: String, displayName: String?) {
+        viewModelScope.launch {
+            repository.getGptForecast(symbol, displayName).collect { result ->
+                _forecast.value = result
             }
         }
     }
@@ -150,15 +161,17 @@ fun DetailScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
-    // ✅ 뉴스 상태 (ViewModel에 news: StateFlow<ApiResult<List<NewsArticle>>> 가 있어야 함)
+    // 뉴스 상태 (ViewModel에 news: StateFlow<ApiResult<List<NewsArticle>>> 가 있어야 함)
     val newsResult by viewModel.news.collectAsState()
+    val forecastResult by viewModel.forecast.collectAsState()
 
     LaunchedEffect(stockDetail.symbol) {
         viewModel.loadStockData(stockDetail.symbol, stockDetail.exchange)
 
-        // ✅ 종목 상세 진입 시 뉴스도 함께 로드
+        // 종목 상세 진입 시 뉴스도 함께 로드
         // - displayName(회사명) 전달 가능하면 필터 정확도/검색 품질이 올라감
         viewModel.loadNews(stockDetail.symbol, stockDetail.name)
+        viewModel.loadForecast(stockDetail.symbol, stockDetail.name)
     }
 
     LaunchedEffect(errorMessage) {
@@ -254,12 +267,20 @@ fun DetailScreen(
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-
+                // ✅ AI 시장 분석 섹션 추가
+                ForecastSection(
+                    result = forecastResult,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                )
                 // ✅ 매수/매도 버튼 아래에 뉴스 섹션 추가
                 NewsSection(
                     result = newsResult,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
+
+
             }
         }
     }
@@ -285,7 +306,7 @@ private fun CurrentPriceSection(
         ) {
             Text(
                 text = quote.currentPrice.toFormattedCurrency(currency),
-                style = MaterialTheme.typography.displayMedium.copy(
+                style = MaterialTheme.typography.displaySmall.copy(
                     fontWeight = FontWeight.Bold
                 )
             )
@@ -295,13 +316,13 @@ private fun CurrentPriceSection(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = quote.change.toFormattedChange(currency),
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleMedium,
                     color = quote.change.getPriceChangeColor()
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
                     text = quote.percentChange.toFormattedPercent(),
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleMedium,
                     color = quote.change.getPriceChangeColor()
                 )
             }
@@ -616,6 +637,79 @@ private fun NewsSection(
         }
     }
 }
+@Composable
+private fun ForecastSection(
+    result: ApiResult<GptForecastResponse>,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "AI 시장 분석",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            when (result) {
+                is ApiResult.Loading -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                }
+
+                is ApiResult.Error -> {
+                    Text(
+                        text = "AI 분석을 불러오지 못했습니다.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                is ApiResult.Success -> {
+                    val data = result.data
+                    Column {
+                        Text(
+                            text = data.summary,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "방향: ${data.direction.toKorean()}",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            Text(
+                                text = "신뢰도: ${(data.confidence * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                        if (!data.risks.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "리스크: ${data.risks}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun NewsArticleCard(
@@ -675,3 +769,5 @@ private fun String.cleanHtml(): String {
         this
     }
 }
+
+

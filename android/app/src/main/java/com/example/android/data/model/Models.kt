@@ -1,6 +1,7 @@
 package com.example.android.data.model
 
 import android.os.Parcelable
+import androidx.recyclerview.widget.ItemTouchHelper
 import com.google.gson.annotations.SerializedName
 import kotlinx.parcelize.Parcelize
 
@@ -305,4 +306,39 @@ data class NewsArticle(
     val url: String,
     val publishedAt: String,
     val source: String
+)
+
+// AI 예측 요청/응답
+data class GptForecastRequest(
+    val symbol: String,
+    val displayName: String?,
+    val limit: Int = 5,
+    val query: String? = null,
+    val model: String? = null
+)
+
+data class UsedArticle(
+    val title: String,
+    val url: String,
+    val publishedAt: String
+)
+
+enum class ForecastDirection {
+    UP, DOWN, NEUTRAL, UNCERTAIN
+}
+fun ForecastDirection.toKorean(): String = when (this) {
+    ForecastDirection.UP -> "상승"
+    ForecastDirection.DOWN -> "하락"
+    ForecastDirection.NEUTRAL -> "중립"
+    ForecastDirection.UNCERTAIN -> "불확실"
+}
+
+
+data class GptForecastResponse(
+    val summary: String,
+    val direction: ForecastDirection,
+    val confidence: Double,
+    val risks: String?,
+    val usedArticles: List<UsedArticle>,
+    val model: String
 )

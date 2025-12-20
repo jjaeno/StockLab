@@ -38,6 +38,17 @@ class StockLabRepository @Inject constructor(
         }
     }
 
+    /** GPT 예측 */
+    fun getGptForecast(symbol: String, displayName: String?): Flow<ApiResult<GptForecastResponse>> = flow {
+        emit(ApiResult.Loading)
+        try {
+            val response = api.getGptForecast(GptForecastRequest(symbol, displayName))
+            emit(response.toApiResult())
+        } catch (e: Exception) {
+            emit(ApiResult.Error(e.localizedMessage ?: "Unknown error"))
+        }
+    }
+
 
     // ==========================================
     // 인증 API

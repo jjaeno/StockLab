@@ -182,6 +182,12 @@ interface ApiService {
         @Query("displayName") displayName: String?,
         @Query("limit") limit: Int = 5
     ): Response<List<NewsArticle>>
+
+    /** GPT 예측 */
+    @POST("news/gpt-forecast")
+    suspend fun getGptForecast(
+        @Body request: GptForecastRequest
+    ): Response<ApiResponse<GptForecastResponse>>
 }
 
 /**
