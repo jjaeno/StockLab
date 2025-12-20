@@ -33,7 +33,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 백엔드 API URL 설정
-        buildConfigField("String", "BASE_URL", "\"http://10.0.2.2:8080/api/v1/\"")
+        buildConfigField("String", "BASE_URL", "\"http://172.20.10.3:8080/api/v1/\"")
     }
 
     buildTypes {
@@ -43,7 +43,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            buildConfigField("String", "http://10.0.2.2:8080/api/v1/", "\"https://your-production-url.com/api/v1/\"")
+            buildConfigField("String", "BASE_URL", "\"https://172.20.10.3:8080/api/v1/\"")
         }
     }
 

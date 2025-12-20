@@ -3,6 +3,7 @@ package com.example.android.ui.detail
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,8 +19,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -35,22 +39,9 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.math.max
 import kotlin.math.min
-
 import android.text.Html
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.EaseInOut
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.clickable
-import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.text.style.TextOverflow
-import com.example.android.data.model.NewsArticle
-import com.example.android.data.model.StockDetail
-
 import com.example.android.ui.components.StockChart
 
-/**
- * 종목 상세 ViewModel
- */
 @HiltViewModel
 class DetailViewModel @Inject constructor(
     private val repository: StockLabRepository
@@ -96,14 +87,13 @@ class DetailViewModel @Inject constructor(
             }
         }
     }
-    /**뉴스 상태*/
+
     private val _news = MutableStateFlow<ApiResult<List<NewsArticle>>>(ApiResult.Loading)
     val news: StateFlow<ApiResult<List<NewsArticle>>> = _news.asStateFlow()
 
     private val _forecast = MutableStateFlow<ApiResult<GptForecastResponse>>(ApiResult.Loading)
     val forecast: StateFlow<ApiResult<GptForecastResponse>> = _forecast.asStateFlow()
 
-    /** 뉴스 로드 */
     fun loadNews(symbol: String, displayName: String?) {
         viewModelScope.launch {
             repository.getNaverNews(symbol, displayName).collect { result ->
@@ -142,9 +132,6 @@ class DetailViewModel @Inject constructor(
     }
 }
 
-/**
- * 종목 상세 화면
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DetailScreen(
@@ -161,15 +148,11 @@ fun DetailScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
-    // 뉴스 상태 (ViewModel에 news: StateFlow<ApiResult<List<NewsArticle>>> 가 있어야 함)
     val newsResult by viewModel.news.collectAsState()
     val forecastResult by viewModel.forecast.collectAsState()
 
     LaunchedEffect(stockDetail.symbol) {
         viewModel.loadStockData(stockDetail.symbol, stockDetail.exchange)
-
-        // 종목 상세 진입 시 뉴스도 함께 로드
-        // - displayName(회사명) 전달 가능하면 필터 정확도/검색 품질이 올라감
         viewModel.loadNews(stockDetail.symbol, stockDetail.name)
         viewModel.loadForecast(stockDetail.symbol, stockDetail.name)
     }
@@ -195,18 +178,22 @@ fun DetailScreen(
                         Text(
                             text = stockDetail.symbol,
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.8f)
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                         )
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "뒤로가기", tint = Color.White)
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = "뒤로가기"
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = Color.White
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
         }
@@ -227,23 +214,25 @@ fun DetailScreen(
                     .padding(paddingValues)
                     .verticalScroll(rememberScrollState())
             ) {
-                quote?.let { quoteData ->
+                quote?.let {
                     CurrentPriceSection(
-                        quote = quoteData.quote,
-                        currency = quoteData.currency
+                        quote = it.quote,
+                        currency = it.currency
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
 
                 CandleRangeSelector(
                     selectedRange = selectedRange,
-                    onRangeSelected = { range ->
-                        viewModel.loadCandles(stockDetail.symbol, stockDetail.exchange, range)
+                    onRangeSelected = {
+                        viewModel.loadCandles(
+                            stockDetail.symbol,
+                            stockDetail.exchange,
+                            it
+                        )
                     }
                 )
-
-                Spacer(modifier = Modifier.height(16.dp))
 
                 candles?.let { candleData ->
                     quote?.let { quoteData ->
@@ -255,92 +244,81 @@ fun DetailScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
-
-                quote?.let { quoteData ->
+                quote?.let {
                     TradeButtons(
                         symbol = stockDetail.symbol,
-                        currentPrice = quoteData.quote.currentPrice,
+                        currentPrice = it.quote.currentPrice,
                         exchange = stockDetail.exchange,
                         onNavigateToOrder = onNavigateToOrder
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-                // ✅ AI 시장 분석 섹션 추가
                 ForecastSection(
                     result = forecastResult,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                 )
-                // ✅ 매수/매도 버튼 아래에 뉴스 섹션 추가
+
+                Divider(
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                )
+
                 NewsSection(
                     result = newsResult,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
-
-
             }
         }
     }
 }
 
-/**
- * 현재가 섹션
- */
 @Composable
 private fun CurrentPriceSection(
     quote: QuoteResponse,
     currency: Currency
 ) {
-    Card(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(4.dp)
+            .padding(horizontal = 16.dp, vertical = 16.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(20.dp)
-        ) {
+        Text(
+            text = quote.currentPrice.toFormattedCurrency(currency),
+            style = MaterialTheme.typography.headlineSmall.copy(
+                fontWeight = FontWeight.Bold
+            ),
+            fontSize = 28.sp
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Row {
             Text(
-                text = quote.currentPrice.toFormattedCurrency(currency),
-                style = MaterialTheme.typography.displaySmall.copy(
-                    fontWeight = FontWeight.Bold
-                )
+                text = quote.change.toFormattedChange(currency),
+                color = quote.change.getPriceChangeColor(),
+                style = MaterialTheme.typography.bodyMedium,
+                fontSize = 15.sp
             )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = quote.percentChange.toFormattedPercent(),
+                color = quote.change.getPriceChangeColor(),
+                style = MaterialTheme.typography.bodyMedium,
+                fontSize = 15.sp
+            )
+        }
 
-            Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = quote.change.toFormattedChange(currency),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = quote.change.getPriceChangeColor()
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = quote.percentChange.toFormattedPercent(),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = quote.change.getPriceChangeColor()
-                )
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Divider()
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                PriceInfoItem("고가", quote.high.toFormattedCurrency(currency))
-                PriceInfoItem("저가", quote.low.toFormattedCurrency(currency))
-                PriceInfoItem("시가", quote.open.toFormattedCurrency(currency))
-            }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            PriceInfoItem("고가", quote.high.toFormattedCurrency(currency))
+            PriceInfoItem("저가", quote.low.toFormattedCurrency(currency))
+            PriceInfoItem("시가", quote.open.toFormattedCurrency(currency))
         }
     }
 }
@@ -350,22 +328,17 @@ private fun PriceInfoItem(label: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             text = label,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
         )
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = value,
-            style = MaterialTheme.typography.bodyLarge.copy(
-                fontWeight = FontWeight.Bold
-            )
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
         )
     }
 }
 
-/**
- * 캔들 기간 선택기
- */
 @Composable
 private fun CandleRangeSelector(
     selectedRange: CandleRange,
@@ -374,147 +347,19 @@ private fun CandleRangeSelector(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 12.dp),
         horizontalArrangement = Arrangement.SpaceEvenly
     ) {
-        CandleRange.values().forEach { range ->
+        CandleRange.values().forEach {
             FilterChip(
-                selected = selectedRange == range,
-                onClick = { onRangeSelected(range) },
-                label = { Text(range.displayName) }
+                selected = selectedRange == it,
+                onClick = { onRangeSelected(it) },
+                label = { Text(it.displayName, fontSize = 12.sp) }
             )
         }
     }
 }
 
-/**
- * Compose 라인 차트 (애니메이션 포함)
- */
-@Composable
-private fun LineChartCompose(
-    candleData: CandleResponse,
-    modifier: Modifier = Modifier
-) {
-    val closeValues = candleData.close
-    if (closeValues.isEmpty()) return
-
-    val minValue = closeValues.minOrNull() ?: 0.0
-    val maxValue = closeValues.maxOrNull() ?: 0.0
-    val valueRange = maxValue - minValue
-
-    // 애니메이션
-    val animatedProgress = remember { Animatable(0f) }
-
-    LaunchedEffect(candleData) {
-        animatedProgress.snapTo(0f)
-        animatedProgress.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(durationMillis = 1000, easing = EaseInOut)
-        )
-    }
-
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(4.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp)
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val width = size.width
-                val height = size.height
-                val progress = animatedProgress.value
-
-                if (closeValues.size < 2) return@Canvas
-
-                val step = width / (closeValues.size - 1)
-
-                // 그리드 라인
-                val gridColor = Color.Gray.copy(alpha = 0.2f)
-                for (i in 0..4) {
-                    val y = height * i / 4
-                    drawLine(
-                        color = gridColor,
-                        start = Offset(0f, y),
-                        end = Offset(width, y),
-                        strokeWidth = 1f
-                    )
-                }
-
-                // 라인 차트 경로
-                val path = Path()
-                val visibleCount = (closeValues.size * progress).toInt().coerceAtLeast(1)
-
-                closeValues.take(visibleCount).forEachIndexed { index, value ->
-                    val x = index * step
-                    val normalizedValue = if (valueRange > 0) {
-                        ((value - minValue) / valueRange).toFloat()
-                    } else {
-                        0.5f
-                    }
-                    val y = height - (normalizedValue * height)
-
-                    if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                }
-
-                // 라인 그리기
-                drawPath(
-                    path = path,
-                    color = Color(0xFF3B82F6),
-                    style = Stroke(width = 3f)
-                )
-
-                // 시작점/끝점 원
-                if (visibleCount > 0 && valueRange > 0) {
-                    val firstValue = closeValues[0]
-                    val firstY = height - (((firstValue - minValue) / valueRange).toFloat() * height)
-                    drawCircle(
-                        color = Color(0xFF3B82F6),
-                        radius = 6f,
-                        center = Offset(0f, firstY)
-                    )
-                }
-
-                if (visibleCount == closeValues.size && valueRange > 0) {
-                    val lastValue = closeValues.last()
-                    val lastX = (closeValues.size - 1) * step
-                    val lastY = height - (((lastValue - minValue) / valueRange).toFloat() * height)
-                    drawCircle(
-                        color = Color(0xFF3B82F6),
-                        radius = 6f,
-                        center = Offset(lastX, lastY)
-                    )
-                }
-            }
-
-            // 가격 범위 표시
-            Column(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 8.dp)
-            ) {
-                Text(
-                    text = "%.0f".format(maxValue),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                Text(
-                    text = "%.0f".format(minValue),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
-            }
-        }
-    }
-}
-
-/**
- * 매수/매도 버튼
- */
 @Composable
 private fun TradeButtons(
     symbol: String,
@@ -525,47 +370,78 @@ private fun TradeButtons(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Button(
             onClick = { onNavigateToOrder(symbol, OrderSide.SELL, currentPrice, exchange) },
             modifier = Modifier
                 .weight(1f)
-                .height(56.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Constants.Colors.BlueDown),
-            shape = RoundedCornerShape(12.dp)
+                .height(48.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Constants.Colors.BlueDown
+            ),
+            shape = RoundedCornerShape(10.dp)
         ) {
-            Text(
-                text = "매도",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
+            Text("매도", fontWeight = FontWeight.Bold)
         }
 
         Button(
             onClick = { onNavigateToOrder(symbol, OrderSide.BUY, currentPrice, exchange) },
             modifier = Modifier
                 .weight(1f)
-                .height(56.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Constants.Colors.RedUp),
-            shape = RoundedCornerShape(12.dp)
+                .height(48.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Constants.Colors.RedUp
+            ),
+            shape = RoundedCornerShape(10.dp)
         ) {
-            Text(
-                text = "매수",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
+            Text("매수", fontWeight = FontWeight.Bold)
         }
     }
 }
 
-/**
- *  뉴스 섹션 (제목 + 요약)
- *
- * ViewModel.news 가 ApiResult<List<NewsArticle>> 형태라고 가정.
- * - Success: 기사 리스트 카드 출력
- * - Loading: 로딩 인디케이터
- * - Error: 간단 에러 표시
- */
+@Composable
+private fun ForecastSection(
+    result: ApiResult<GptForecastResponse>,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = "이슈 요약",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        when (result) {
+            is ApiResult.Loading -> {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            }
+            is ApiResult.Error -> {
+                Text(
+                    text = "요약을 불러오지 못했습니다",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                )
+            }
+            is ApiResult.Success -> {
+                Text(
+                    text = result.data.summary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    lineHeight = 20.sp
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${result.data.direction.toKorean()} 전망 · 신뢰도 ${(result.data.confidence * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun NewsSection(
     result: ApiResult<List<NewsArticle>>,
@@ -573,137 +449,40 @@ private fun NewsSection(
 ) {
     val uriHandler = LocalUriHandler.current
 
-    Card(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .then(modifier),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(4.dp)
+            .then(modifier)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "관련 뉴스",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
-            Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = "관련 뉴스",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+        )
 
-            when (result) {
-                is ApiResult.Loading -> {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator()
-                    }
-                }
+        Spacer(modifier = Modifier.height(8.dp))
 
-                is ApiResult.Error -> {
-                    Text(
-                        text = "뉴스를 불러오지 못했습니다.",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-
-                is ApiResult.Success -> {
-                    val articles = result.data
-                    if (articles.isEmpty()) {
-                        Text(
-                            text = "관련 뉴스가 없습니다.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                        )
-                    } else {
-                        articles.forEachIndexed { idx, article ->
-                            NewsArticleCard(
-                                article = article,
-                                onClick = {
-                                    // URL이 비어있지 않을 때만 오픈
-                                    if (article.url.isNotBlank()) {
-                                        uriHandler.openUri(article.url)
-                                    }
-                                }
-                            )
-                            if (idx != articles.lastIndex) {
-                                Spacer(modifier = Modifier.height(10.dp))
-                            }
-                        }
-                    }
-                }
+        when (result) {
+            is ApiResult.Loading -> {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             }
-        }
-    }
-}
-@Composable
-private fun ForecastSection(
-    result: ApiResult<GptForecastResponse>,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(4.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "AI 시장 분석",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            when (result) {
-                is ApiResult.Loading -> {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            strokeWidth = 2.dp
-                        )
+            is ApiResult.Error -> {
+                Text(
+                    text = "뉴스를 불러오지 못했습니다",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                )
+            }
+            is ApiResult.Success -> {
+                result.data.forEachIndexed { idx, article ->
+                    NewsArticleItem(article) {
+                        uriHandler.openUri(article.url)
                     }
-                }
-
-                is ApiResult.Error -> {
-                    Text(
-                        text = "AI 분석을 불러오지 못했습니다.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-
-                is ApiResult.Success -> {
-                    val data = result.data
-                    Column {
-                        Text(
-                            text = data.summary,
-                            style = MaterialTheme.typography.bodyMedium
+                    if (idx != result.data.lastIndex) {
+                        Divider(
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "방향: ${data.direction.toKorean()}",
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                            Text(
-                                text = "신뢰도: ${(data.confidence * 100).toInt()}%",
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                        }
-                        if (!data.risks.isNullOrBlank()) {
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "리스크: ${data.risks}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
                     }
                 }
             }
@@ -712,56 +491,38 @@ private fun ForecastSection(
 }
 
 @Composable
-private fun NewsArticleCard(
+private fun NewsArticleItem(
     article: NewsArticle,
     onClick: () -> Unit
 ) {
-    Card(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(1.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            .clickable(onClick = onClick)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = article.title.cleanHtml(),
-                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = article.summary.cleanHtml(),
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = article.source.ifBlank { "NAVER" },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
-                Text(
-                    text = article.publishedAt,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
-            }
-        }
+        Text(
+            text = article.title.cleanHtml(),
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = article.summary.cleanHtml(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "${article.source} · ${article.publishedAt}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+        )
     }
 }
 
-/**
- * title/summary에 HTML 엔티티나 태그가 섞일 때 대비용
- */
 private fun String.cleanHtml(): String {
     return try {
         Html.fromHtml(this, Html.FROM_HTML_MODE_LEGACY).toString().trim()
@@ -769,5 +530,3 @@ private fun String.cleanHtml(): String {
         this
     }
 }
-
-

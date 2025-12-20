@@ -46,83 +46,64 @@ fun LoginScreen(
     val context = LocalContext.current
     val authState by viewModel.authState.collectAsState()
 
-    // 로그인 성공 시 메인 화면으로 이동
     LaunchedEffect(authState) {
         when (authState) {
             is AuthState.Authenticated -> {
                 val response = (authState as AuthState.Authenticated).authResponse
-                context.showToast("환영합니다, ${response.displayName}님!")
+                context.showToast("환영합니다, ${response.displayName}님")
                 onLoginSuccess()
             }
             is AuthState.Error -> {
-                val error = (authState as AuthState.Error).message
-                context.showToast(error)
+                context.showToast((authState as AuthState.Error).message)
             }
-            else -> {}
+            else -> Unit
         }
     }
 
-    // 탭 상태 (0: 로그인, 1: 회원가입)
     var selectedTab by remember { mutableStateOf(0) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF1E3A8A),
-                        Color(0xFF3B82F6)
-                    )
-                )
-            )
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.surface
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.Center
         ) {
-            // 앱 로고 및 타이틀
+
+            // 타이틀 (증권 앱 톤)
             Text(
-                text = "📈 StockLab",
-                style = MaterialTheme.typography.displayMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+                text = "StockLab",
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    fontWeight = FontWeight.Bold
                 )
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "모의 투자로 실전 경험을 쌓아보세요",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    color = Color.White.copy(alpha = 0.8f)
-                )
+                text = "모의 투자로 실전 감각을 익혀보세요",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
 
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.height(32.dp))
 
-            // 카드 형태의 로그인 폼
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .wrapContentHeight(),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = Color.White
-                ),
-                elevation = CardDefaults.cardElevation(8.dp)
+            // 로그인 / 회원가입 컨테이너
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                tonalElevation = 0.dp
             ) {
                 Column(
-                    modifier = Modifier.padding(24.dp)
+                    modifier = Modifier.padding(20.dp)
                 ) {
-                    // 탭 선택
                     TabRow(
                         selectedTabIndex = selectedTab,
                         containerColor = Color.Transparent,
-                        contentColor = MaterialTheme.colorScheme.primary
+                        divider = {}
                     ) {
                         Tab(
                             selected = selectedTab == 0,
@@ -136,9 +117,8 @@ fun LoginScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
 
-                    // 폼 내용
                     when (selectedTab) {
                         0 -> LoginForm(
                             viewModel = viewModel,
@@ -154,6 +134,7 @@ fun LoginScreen(
         }
     }
 }
+
 
 /**
  * 로그인 폼

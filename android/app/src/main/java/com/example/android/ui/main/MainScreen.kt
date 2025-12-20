@@ -1,11 +1,12 @@
 package com.example.android.ui.main
 
+import android.util.Log
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -17,24 +18,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.google.accompanist.swiperefresh.SwipeRefresh
-import com.google.accompanist.swiperefresh.rememberSwipeRefreshState
 import com.example.android.data.model.*
 import com.example.android.util.*
 import com.example.android.viewmodel.AuthViewModel
 import com.example.android.viewmodel.MainViewModel
-import android.util.Log
+import com.google.accompanist.swiperefresh.SwipeRefresh
+import com.google.accompanist.swiperefresh.rememberSwipeRefreshState
 
-/**
- * 메인 화면 (리팩토링 완료)
- *
- * 핵심 개선:
- * - QuoteResult.status 처리 (SUCCESS/FAILED/CACHED)
- * - 실패 시 lastKnownPrice 표시
- * - API 재호출 방지
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
@@ -46,7 +40,6 @@ fun MainScreen(
     val context = LocalContext.current
     val authResponse by authViewModel.authResponse.collectAsState()
 
-    // StateFlow 구독만
     val watchlist by mainViewModel.watchlist.collectAsState()
     val watchlistQuotes by mainViewModel.watchlistQuotes.collectAsState()
     val searchQuery by mainViewModel.searchQuery.collectAsState()
@@ -56,7 +49,6 @@ fun MainScreen(
     val isLoading by mainViewModel.isLoading.collectAsState()
     val errorMessage by mainViewModel.errorMessage.collectAsState()
 
-    // 초기화 (한 번만)
     val hasInitialized = remember { mutableStateOf(false) }
     LaunchedEffect(authResponse?.uid) {
         authResponse?.uid?.let { uid ->
@@ -87,15 +79,15 @@ fun MainScreen(
                     IconButton(onClick = { mainViewModel.refresh() }) {
                         Icon(
                             Icons.Default.Refresh,
-                            contentDescription = "새로고침",
-                            tint = Color.White
+                            contentDescription = "새로고침"
                         )
                     }
                 },
+                // 증권 앱 톤: 과한 컬러 배경 대신 기본 톤 유지
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = Color.White,
-                    actionIconContentColor = Color.White
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
         }
@@ -109,7 +101,6 @@ fun MainScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 16.dp)
             ) {
-                // 잔고 카드
                 item {
                     authResponse?.let { auth ->
                         BalanceCard(
@@ -119,7 +110,7 @@ fun MainScreen(
                         )
                     }
                 }
-                // 핫스톡 섹션
+
                 item {
                     val hotStocksList by mainViewModel.hotStocks.collectAsState()
                     if (hotStocksList.isNotEmpty()) {
@@ -145,8 +136,6 @@ fun MainScreen(
                     }
                 }
 
-
-                // 검색바
                 item {
                     SearchBar(
                         query = searchQuery,
@@ -155,7 +144,6 @@ fun MainScreen(
                     )
                 }
 
-                // 검색 중일 때
                 if (searchQuery.isNotEmpty()) {
                     item {
                         Text(
@@ -196,35 +184,27 @@ fun MainScreen(
                         )
                     }
                 } else {
-                    // 관심종목 섹션
                     item {
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    Icons.Default.Star,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "관심종목",
-                                    style = MaterialTheme.typography.titleLarge.copy(
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                )
-                            }
                             Text(
-                                text = "${watchlist.size}개",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                text = "관심종목",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "${watchlist.size}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                fontSize = 12.sp
                             )
                         }
                     }
@@ -234,23 +214,21 @@ fun MainScreen(
                             EmptyWatchlistCard()
                         }
                     } else {
-                        // ⭐ 관심종목 표시 (QuoteResult 사용)
                         items(
                             items = watchlist,
                             key = { "${it.exchange ?: "NONE"}_${it.symbol}" }
                         ) { item ->
-                            val quoteResult = watchlistQuotes[item.symbol]  // ⭐ QuoteResult
+                            val quoteResult = watchlistQuotes[item.symbol]
                             val stockName = item.getDisplayName()
                             val isInWatchlist = true
 
                             EnhancedStockItemCard(
                                 symbol = item.symbol,
                                 name = stockName,
-                                quoteResult = quoteResult,  // ⭐ QuoteResult 전달
+                                quoteResult = quoteResult,
                                 isInWatchlist = isInWatchlist,
                                 onClick = {
-                                    // 성공한 경우에만 상세화면 이동
-                                    quoteResult?.data?.let { quote ->
+                                    quoteResult?.data?.let { _ ->
                                         onStockClick(
                                             StockDetail(
                                                 symbol = item.symbol,
@@ -272,30 +250,16 @@ fun MainScreen(
                         }
                     }
 
-                    // 전체 종목 리스트
                     item {
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Default.List,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "전체 종목",
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold
-                                )
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "전체 종목",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
+                            fontSize = 16.sp,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        )
                     }
 
                     items(
@@ -305,14 +269,12 @@ fun MainScreen(
                         val quoteResult = allStockQuotes[stock.symbol]
                         val isInWatchlist = watchlist.any { it.symbol == stock.symbol }
 
-                        // 전체 종목도 관심종목과 동일한 카드 사용
                         EnhancedStockItemCard(
                             symbol = stock.symbol,
                             name = stock.name,
                             quoteResult = quoteResult,
                             isInWatchlist = isInWatchlist,
                             onClick = {
-                                // quoteResult?.data != null 일 때만 상세로 이동
                                 val stockType = if (stock.symbol.isDomesticStock())
                                     StockType.DOMESTIC else StockType.OVERSEAS
                                 val currency = if (stockType == StockType.DOMESTIC)
@@ -339,16 +301,12 @@ fun MainScreen(
                             }
                         )
                     }
-
                 }
             }
         }
     }
 }
 
-/**
- * ⭐ 개선된 종목 카드 (QuoteResult.status 처리)
- */
 @Composable
 private fun EnhancedStockItemCard(
     symbol: String,
@@ -358,257 +316,147 @@ private fun EnhancedStockItemCard(
     onClick: () -> Unit,
     onToggleWatchlist: () -> Unit
 ) {
-    Card(
+    // 증권 앱 톤: 카드 느낌 최소화 + 리스트형 밀도
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clickable(onClick = onClick, enabled = quoteResult?.data != null),
-        shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(2.dp)
+            .clickable(onClick = onClick, enabled = quoteResult?.data != null)
+            .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // 왼쪽: 종목 정보
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = name,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold
-                    )
-                )
-                Text(
-                    text = symbol,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
-            }
-
-            // ⭐ 중간: 가격 정보 (status에 따라 처리)
-            when {
-                quoteResult == null -> {
-                    // 로딩 중
-                    CircularProgressIndicator(
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp)
-                            .size(24.dp),
-                        strokeWidth = 2.dp
-                    )
-                }
-                quoteResult.status == ResultStatus.SUCCESS -> {
-                    // ✅ 성공: 정상 표시
-                    val quote = quoteResult.data!!
-                    val currency = if (symbol.isDomesticStock()) Currency.KRW else Currency.USD
-
-                    Column(
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        horizontalAlignment = Alignment.End
-                    ) {
-                        Text(
-                            text = quote.currentPrice.toFormattedCurrency(currency),
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = quote.change.toFormattedChange(currency),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = quote.change.getPriceChangeColor()
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = quote.percentChange.toFormattedPercent(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = quote.change.getPriceChangeColor()
-                            )
-                        }
-                    }
-                }
-                quoteResult.status == ResultStatus.FAILED -> {
-                    // ⚠️ 실패: last-known-good or 플레이스홀더
-                    Column(
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        horizontalAlignment = Alignment.End
-                    ) {
-                        if (quoteResult.lastKnownPrice != null) {
-                            // last-known-good 가격 표시
-                            val currency = if (symbol.isDomesticStock()) Currency.KRW else Currency.USD
-                            Text(
-                                text = quoteResult.lastKnownPrice.toFormattedCurrency(currency),
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                            )
-                            Text(
-                                text = "마지막 시세",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
-                            )
-                        } else {
-                            // 에러 아이콘 표시
-                            Icon(
-                                Icons.Default.Error,
-                                contentDescription = "조회 실패",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Text(
-                                text = when (quoteResult.reason) {
-                                    "TIMEOUT" -> "시간 초과"
-                                    "RATE_LIMIT" -> "제한 초과"
-                                    "API_ERROR" -> "API 오류"
-                                    else -> "오류"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-                }
-                quoteResult.status == ResultStatus.CACHED -> {
-                    // 📦 캐시된 데이터 (SUCCESS와 동일하게 표시)
-                    val quote = quoteResult.data!!
-                    val currency = if (symbol.isDomesticStock()) Currency.KRW else Currency.USD
-
-                    Column(
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        horizontalAlignment = Alignment.End
-                    ) {
-                        Text(
-                            text = quote.currentPrice.toFormattedCurrency(currency),
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.Cached,
-                                contentDescription = "캐시",
-                                modifier = Modifier.size(12.dp),
-                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = quote.change.toFormattedChange(currency),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = quote.change.getPriceChangeColor()
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 오른쪽: 관심종목 토글
-            IconButton(
-                onClick = onToggleWatchlist,
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(
-                    imageVector = if (isInWatchlist) Icons.Default.Star else Icons.Default.StarBorder,
-                    contentDescription = if (isInWatchlist) "관심종목 삭제" else "관심종목 추가",
-                    tint = if (isInWatchlist) Color(0xFFFFC107)
-                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                )
-            }
-        }
-    }
-}
-
-/**
- * 기존 종목 카드 (전체 종목용 - UnifiedQuoteResponse 사용)
- */
-@Composable
-private fun EnhancedStockItemCardOld(
-    symbol: String,
-    name: String,
-    quote: UnifiedQuoteResponse?,
-    isInWatchlist: Boolean,
-    onClick: () -> Unit,
-    onToggleWatchlist: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clickable(onClick = onClick, enabled = quote != null),
-        shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(2.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = name,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold
-                    )
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = FontWeight.Medium
+                    ),
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = symbol,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    fontSize = 12.sp
                 )
             }
 
-            if (quote != null) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                    horizontalAlignment = Alignment.End
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                when {
+                    quoteResult == null -> {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .padding(end = 12.dp)
+                                .size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                    quoteResult.status == ResultStatus.SUCCESS -> {
+                        val quote = quoteResult.data!!
+                        val currency = if (symbol.isDomesticStock()) Currency.KRW else Currency.USD
+
+                        Column(
+                            modifier = Modifier.padding(end = 10.dp),
+                            horizontalAlignment = Alignment.End
+                        ) {
+                            Text(
+                                text = quote.currentPrice.toFormattedCurrency(currency),
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                fontSize = 15.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "${quote.change.toFormattedChange(currency)} ${quote.percentChange.toFormattedPercent()}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = quote.change.getPriceChangeColor(),
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                    quoteResult.status == ResultStatus.FAILED -> {
+                        Column(
+                            modifier = Modifier.padding(end = 10.dp),
+                            horizontalAlignment = Alignment.End
+                        ) {
+                            if (quoteResult.lastKnownPrice != null) {
+                                val currency = if (symbol.isDomesticStock()) Currency.KRW else Currency.USD
+                                Text(
+                                    text = quoteResult.lastKnownPrice.toFormattedCurrency(currency),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                                    fontSize = 14.sp
+                                )
+                                Text(
+                                    text = "조회 실패",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                    fontSize = 11.sp
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.Error,
+                                    contentDescription = "조회 실패",
+                                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                    quoteResult.status == ResultStatus.CACHED -> {
+                        val quote = quoteResult.data!!
+                        val currency = if (symbol.isDomesticStock()) Currency.KRW else Currency.USD
+
+                        Column(
+                            modifier = Modifier.padding(end = 10.dp),
+                            horizontalAlignment = Alignment.End
+                        ) {
+                            Text(
+                                text = quote.currentPrice.toFormattedCurrency(currency),
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                fontSize = 15.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "${quote.change.toFormattedChange(currency)} ${quote.percentChange.toFormattedPercent()}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = quote.change.getPriceChangeColor(),
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
+                IconButton(
+                    onClick = onToggleWatchlist,
+                    modifier = Modifier.size(36.dp)
                 ) {
-                    val quoteData = quote.quote
-                    Text(
-                        text = quoteData.currentPrice.toFormattedCurrency(quote.currency),
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.Bold
-                        )
+                    Icon(
+                        imageVector = if (isInWatchlist) Icons.Default.Star else Icons.Default.StarBorder,
+                        contentDescription = if (isInWatchlist) "관심종목 삭제" else "관심종목 추가",
+                        tint = if (isInWatchlist) Color(0xFFFFC107)
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                        modifier = Modifier.size(20.dp)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = quoteData.change.toFormattedChange(quote.currency),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = quoteData.change.getPriceChangeColor()
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = quoteData.percentChange.toFormattedPercent(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = quoteData.change.getPriceChangeColor()
-                        )
-                    }
                 }
-            } else {
-                CircularProgressIndicator(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .size(24.dp),
-                    strokeWidth = 2.dp
-                )
-            }
-
-            IconButton(
-                onClick = onToggleWatchlist,
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(
-                    imageVector = if (isInWatchlist) Icons.Default.Star else Icons.Default.StarBorder,
-                    contentDescription = if (isInWatchlist) "관심종목 삭제" else "관심종목 추가",
-                    tint = if (isInWatchlist) Color(0xFFFFC107)
-                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                )
             }
         }
+
+        // 구분선 (증권 앱 리스트 느낌)
+        Divider(
+            modifier = Modifier.padding(top = 10.dp),
+            thickness = 1.dp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+        )
     }
 }
 
@@ -618,45 +466,49 @@ private fun BalanceCard(
     cashKrw: Double,
     cashUsd: Double
 ) {
-    Card(
+    // 증권 앱 톤: 라운드 + surfaceVariant + 정보 밀도
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        ),
-        elevation = CardDefaults.cardElevation(4.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        tonalElevation = 0.dp
     ) {
         Column(
-            modifier = Modifier.padding(20.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp)
         ) {
             Text(
-                text = "${displayName}님의 잔고",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                text = "${displayName}님",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                fontSize = 12.sp
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
             ) {
                 Column {
                     Text(
-                        text = "KRW",
+                        text = "총 자산",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        fontSize = 12.sp
                     )
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = cashKrw.toFormattedCurrency(Currency.KRW),
                         style = MaterialTheme.typography.headlineSmall.copy(
                             fontWeight = FontWeight.Bold
                         ),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        fontSize = 22.sp,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
 
@@ -664,14 +516,17 @@ private fun BalanceCard(
                     Text(
                         text = "USD",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        fontSize = 12.sp
                     )
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = cashUsd.toFormattedCurrency(Currency.USD),
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.Bold
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Medium
                         ),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        fontSize = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
@@ -679,28 +534,46 @@ private fun BalanceCard(
     }
 }
 
-
 @Composable
 private fun SearchBar(
     query: String,
     onQueryChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // 증권 앱 톤: 라운드, 높이 조금 낮게, 배경 톤 정리
     OutlinedTextField(
         value = query,
         onValueChange = onQueryChange,
-        modifier = modifier.fillMaxWidth(),
-        placeholder = { Text("종목 검색 (예: 삼성전자, AAPL)") },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        modifier = modifier
+            .fillMaxWidth(),
+        placeholder = { Text("종목 검색", fontSize = 14.sp) },
+        leadingIcon = {
+            Icon(
+                Icons.Default.Search,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+        },
         trailingIcon = {
             if (query.isNotEmpty()) {
                 IconButton(onClick = { onQueryChange("") }) {
-                    Icon(Icons.Default.Close, contentDescription = "지우기")
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "지우기",
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
         },
         singleLine = true,
-        shape = RoundedCornerShape(12.dp)
+        shape = RoundedCornerShape(12.dp),
+        textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+        colors = OutlinedTextFieldDefaults.colors(
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+            unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+        )
     )
 }
 
@@ -710,83 +583,88 @@ private fun SearchResultItem(
     onClick: () -> Unit,
     onAddClick: () -> Unit
 ) {
-    Card(
+    // 증권 앱 톤: 줄 간격/정보 밀도 + 구분선
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(2.dp)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = stock.name,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold
-                    )
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = "${stock.symbol} · ${stock.market}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    fontSize = 12.sp
                 )
             }
 
             IconButton(
                 onClick = onAddClick,
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer)
+                modifier = Modifier.size(36.dp)
             ) {
                 Icon(
                     Icons.Default.Add,
                     contentDescription = "관심종목 추가",
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
+
+        Divider(
+            modifier = Modifier.padding(top = 10.dp),
+            thickness = 0.5.dp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+        )
     }
 }
 
 @Composable
 private fun EmptyWatchlistCard() {
-    Card(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp)
-            .height(120.dp),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        tonalElevation = 0.dp
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(
-                    Icons.Default.StarBorder,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "관심종목이 없습니다",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                )
-            }
+            Icon(
+                imageVector = Icons.Default.StarBorder,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                modifier = Modifier.size(18.dp)
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Text(
+                text = "관심종목이 없습니다",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                fontSize = 14.sp
+            )
         }
     }
 }
@@ -796,33 +674,25 @@ private fun HotStocksSection(
     items: List<HotStockItem>,
     onItemClick: (HotStockItem) -> Unit
 ) {
-    Card(
+    // 증권 앱 톤: 섹션 컨테이너를 라운드로 잡고, 내부는 리스트형
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(4.dp)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        tonalElevation = 0.dp
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "AI 주목 종목",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold
-                    )
-                )
-                Text(
-                    text = "뉴스 이슈 기반",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
-            }
+            Text(
+                text = "이슈 종목",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                fontSize = 16.sp
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -832,7 +702,11 @@ private fun HotStocksSection(
                     onClick = { onItemClick(item) }
                 )
                 if (item != items.last()) {
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Divider(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                    )
                 }
             }
         }
@@ -844,68 +718,82 @@ private fun HotStockItemCard(
     item: HotStockItem,
     onClick: () -> Unit
 ) {
-    Card(
+    // 요구사항: reason이 길면 토글식으로 펼칠 수 있게 (시그니처/호출 구조 유지)
+    var expanded by remember(item.symbol, item.rank) { mutableStateOf(false) }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-        )
+            .clickable(onClick = onClick)
+            .animateContentSize()
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp)
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(
-                modifier = Modifier.size(36.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = "${item.rank}",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    )
-                }
-            }
+            // 랭크는 과한 배지 대신 작게 정돈 (기능/데이터는 유지)
+            Text(
+                text = "${item.rank}",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                modifier = Modifier.width(24.dp)
+            )
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(10.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = item.displayName,
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.Bold
-                    )
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = item.symbol,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    fontSize = 11.sp
                 )
+            }
 
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = "주목: ${item.reason}",
-                    style = MaterialTheme.typography.bodySmall,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = "리스크: ${item.risk}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            // 토글 버튼: onClick(종목 이동)과 분리되게 IconButton 사용
+            IconButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "접기" else "펼치기",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // reason: 기본 1줄 + 펼치면 전체 표시
+        Text(
+            text = item.reason,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            fontSize = 12.sp,
+            maxLines = if (expanded) Int.MAX_VALUE else 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 34.dp) // rank 폭(24) + 간격(10)
+        )
+
+        // 텍스트 길이 상관없이 UX 통일: 작은 '더보기/접기' 라벨 제공
+        Text(
+            text = if (expanded) "접기" else "더보기",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+            modifier = Modifier
+                .padding(start = 34.dp, top = 6.dp)
+                .clickable { expanded = !expanded }
+        )
     }
 }

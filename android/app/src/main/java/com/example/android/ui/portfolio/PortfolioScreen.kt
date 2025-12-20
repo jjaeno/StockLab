@@ -31,10 +31,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-
-/**
- * 포트폴리오 ViewModel
- */
+import androidx.compose.foundation.clickable
 @HiltViewModel
 class PortfolioViewModel @Inject constructor(
     private val repository: StockLabRepository
@@ -70,11 +67,10 @@ class PortfolioViewModel @Inject constructor(
         }
     }
 
-    /**
-     * 특정 종목의 보유 수량 조회
-     */
     fun getHoldingQuantity(symbol: String): Double {
-        return _portfolio.value?.positions?.find { it.symbol == symbol }?.quantity ?: 0.0
+        return _portfolio.value?.positions
+            ?.find { it.symbol == symbol }
+            ?.quantity ?: 0.0
     }
 
     fun clearError() {
@@ -82,9 +78,6 @@ class PortfolioViewModel @Inject constructor(
     }
 }
 
-/**
- * 포트폴리오 화면
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PortfolioScreen(
@@ -117,51 +110,58 @@ fun PortfolioScreen(
             TopAppBar(
                 title = {
                     Text(
-                        "포트폴리오",
+                        text = "포트폴리오",
                         fontWeight = FontWeight.Bold
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = Color.White
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
         }
     ) { paddingValues ->
         SwipeRefresh(
             state = swipeRefreshState,
-            onRefresh = {
-                uid?.let { viewModel.loadPortfolio(it) }
-            },
+            onRefresh = { uid?.let { viewModel.loadPortfolio(it) } },
             modifier = Modifier.padding(paddingValues)
         ) {
             portfolio?.let { data ->
                 LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
                     item {
-                        TotalAssetsCard(portfolio = data)
+                        TotalAssetsSection(data)
                     }
 
                     item {
                         Text(
                             text = "보유 종목",
-                            style = MaterialTheme.typography.titleLarge.copy(
+                            style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold
+                            ),
+                            modifier = Modifier.padding(
+                                horizontal = 16.dp,
+                                vertical = 12.dp
                             )
                         )
                     }
 
                     if (data.positions.isEmpty()) {
-                        item { EmptyPositionsCard() }
+                        item { EmptyPositionsSection() }
                     } else {
-                        items(data.positions) { position ->
-                            PositionCard(
+                        items(
+                            items = data.positions,
+                            key = { it.symbol }
+                        ) { position ->
+                            PositionListItem(
                                 position = position,
                                 onClick = {
-                                    val stockType = if (position.symbol.isDomesticStock())
-                                        StockType.DOMESTIC else StockType.OVERSEAS
+                                    val stockType =
+                                        if (position.symbol.isDomesticStock())
+                                            StockType.DOMESTIC
+                                        else StockType.OVERSEAS
 
                                     onStockClick(
                                         StockDetail(
@@ -183,195 +183,161 @@ fun PortfolioScreen(
 }
 
 @Composable
-private fun TotalAssetsCard(portfolio: PortfolioResponse) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        ),
-        elevation = CardDefaults.cardElevation(4.dp)
+private fun TotalAssetsSection(portfolio: PortfolioResponse) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
     ) {
-        Column(
-            modifier = Modifier.padding(20.dp)
-        ) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = "총 자산",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "KRW",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                    )
-                    Text(
-                        text = portfolio.totalAssetsKrw.toFormattedCurrency(Currency.KRW),
-                        style = MaterialTheme.typography.headlineMedium.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "평가: ${portfolio.totalMarketValueKrw.toFormattedCurrency(Currency.KRW)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                    )
-                }
-            }
+            Text(
+                text = portfolio.totalAssetsKrw.toFormattedCurrency(Currency.KRW),
+                style = MaterialTheme.typography.headlineSmall.copy(
+                    fontWeight = FontWeight.Bold
+                )
+            )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
-            Divider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
+            Text(
+                text = "평가 ${portfolio.totalMarketValueKrw.toFormattedCurrency(Currency.KRW)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+            )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Divider(
+                modifier = Modifier.padding(vertical = 12.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+            )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "USD",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                    )
-                    Text(
-                        text = portfolio.totalAssetsUsd.toFormattedCurrency(Currency.USD),
-                        style = MaterialTheme.typography.headlineMedium.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "평가: ${portfolio.totalMarketValueUsd.toFormattedCurrency(Currency.USD)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                    )
-                }
-            }
+            Text(
+                text = portfolio.totalAssetsUsd.toFormattedCurrency(Currency.USD),
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Medium
+                )
+            )
+
+            Text(
+                text = "평가 ${portfolio.totalMarketValueUsd.toFormattedCurrency(Currency.USD)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+            )
         }
     }
 }
 
 @Composable
-private fun PositionCard(
+private fun PositionListItem(
     position: PositionView,
     onClick: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        onClick = onClick,
-        elevation = CardDefaults.cardElevation(2.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                // 종목명 표시 (개선)
                 Text(
                     text = position.getDisplayName(),
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = FontWeight.Medium
                     )
                 )
-
-                // 심볼 작게 표시
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = position.symbol,
+                    text = "${position.symbol} · ${position.quantity.toFormattedNumber(2)}주",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
                 )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "${position.quantity.toFormattedNumber(2)}주 · 평균 ${position.avgPrice.toFormattedCurrency(position.currency)}",
+                    text = "평균 ${position.avgPrice.toFormattedCurrency(position.currency)}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
                 )
             }
 
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     text = position.marketValue.toFormattedCurrency(position.currency),
-                    style = MaterialTheme.typography.titleMedium.copy(
+                    style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.Bold
                     )
                 )
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(2.dp))
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.End
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = if (position.isProfit) Icons.Default.TrendingUp
+                        imageVector = if (position.isProfit)
+                            Icons.Default.TrendingUp
                         else Icons.Default.TrendingDown,
                         contentDescription = null,
-                        tint = if (position.isProfit) Constants.Colors.ProfitGreen
+                        tint = if (position.isProfit)
+                            Constants.Colors.ProfitGreen
                         else Constants.Colors.LossRed,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "${position.profitLoss.toFormattedChange(position.currency)} (${position.profitLossPercent.toFormattedPercent()})",
+                        text = "${position.profitLoss.toFormattedChange(position.currency)} " +
+                                position.profitLossPercent.toFormattedPercent(),
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (position.isProfit) Constants.Colors.ProfitGreen
+                        color = if (position.isProfit)
+                            Constants.Colors.ProfitGreen
                         else Constants.Colors.LossRed
                     )
                 }
             }
         }
+
+        Divider(
+            modifier = Modifier.padding(top = 10.dp),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+        )
     }
 }
 
 @Composable
-private fun EmptyPositionsCard() {
-    Card(
+private fun EmptyPositionsSection() {
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(150.dp),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+            .padding(horizontal = 16.dp, vertical = 24.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "보유 종목이 없습니다",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "종목을 매수하여 포트폴리오를 구성해보세요",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                )
-            }
+            Text(
+                text = "보유 종목이 없습니다",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "종목을 매수하여 포트폴리오를 구성해보세요",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+            )
         }
     }
 }

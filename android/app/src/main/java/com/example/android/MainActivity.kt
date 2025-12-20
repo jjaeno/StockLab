@@ -12,7 +12,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -258,45 +260,119 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("설정") },
+                title = {
+                    Text(
+                        text = "설정",
+                        fontWeight = FontWeight.Bold
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = Color.White
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
         }
     ) { padding ->
         Column(
             modifier = Modifier
+                .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
+
             authResponse?.let { auth ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+
+                // 계정 정보 섹션
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(
+                        modifier = Modifier.padding(20.dp)
+                    ) {
                         Text(
                             text = "계정 정보",
-                            style = MaterialTheme.typography.titleMedium
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold
+                            )
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("이름: ${auth.displayName}")
-                        Text("이메일: ${auth.email}")
-                        Text("UID: ${auth.uid}")
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        SettingInfoRow(
+                            label = "이름",
+                            value = auth.displayName
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        SettingInfoRow(
+                            label = "이메일",
+                            value = auth.email
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        SettingInfoRow(
+                            label = "UID",
+                            value = auth.uid,
+                            isMono = true
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(28.dp))
 
-                Button(
+                // 로그아웃 버튼 (destructive)
+                OutlinedButton(
                     onClick = { authViewModel.signOut() },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                        brush = SolidColor(MaterialTheme.colorScheme.error)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("로그아웃")
+                    Text(
+                        text = "로그아웃",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
                 }
             }
         }
+    }
+}
+
+/**
+ * 설정 정보 Row
+ */
+@Composable
+private fun SettingInfoRow(
+    label: String,
+    value: String,
+    isMono: Boolean = false
+) {
+    Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = value,
+            style = if (isMono)
+                MaterialTheme.typography.bodySmall
+            else
+                MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
     }
 }

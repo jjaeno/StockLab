@@ -76,9 +76,6 @@ class OrderViewModel @Inject constructor(
     }
 }
 
-/**
- * 주문 확인 화면 (매도 시 보유수량 표시)
- */
 @Composable
 fun OrderConfirmScreen(
     symbol: String,
@@ -93,135 +90,93 @@ fun OrderConfirmScreen(
 ) {
     val context = LocalContext.current
     val authResponse by authViewModel.authResponse.collectAsState()
-    // 포트폴리오 로드
+    val orderState by orderViewModel.orderState.collectAsState()
+
     val uid = authViewModel.uid
     LaunchedEffect(uid) {
         uid?.let { portfolioViewModel.loadPortfolio(it) }
     }
-    val orderState by orderViewModel.orderState.collectAsState()
 
-    // 보유 수량 조회 (포트폴리오가 로드되었다면 실제 수량, 아니면 0.0)
-    val holdingQuantity = if (side == OrderSide.SELL) {
-        portfolioViewModel.getHoldingQuantity(symbol)
-    } else {
-        0.0
-    }
+    val holdingQuantity =
+        if (side == OrderSide.SELL) portfolioViewModel.getHoldingQuantity(symbol) else 0.0
 
     var quantity by remember { mutableStateOf("1") }
     val quantityDouble = quantity.toDoubleOrNull() ?: 0.0
 
     val currency = if (symbol.isDomesticStock()) Currency.KRW else Currency.USD
     val totalAmount = currentPrice * quantityDouble
-
-    // 매도 시 수량 초과 체크
     val isQuantityExceeded = side == OrderSide.SELL && quantityDouble > holdingQuantity
 
     LaunchedEffect(orderState) {
         when (orderState) {
             is UiState.Success -> {
                 context.showToast("주문이 체결되었습니다")
-                // 주문 후 포트폴리오 갱신
-                // 사용자의 UID는 authViewModel.uid에 저장되어 있음
-                authViewModel.uid?.let { uid ->
-                    portfolioViewModel.loadPortfolio(uid)
-                }
-                // 주문 상태 초기화
+                authViewModel.uid?.let { portfolioViewModel.loadPortfolio(it) }
                 orderViewModel.resetOrderState()
                 onOrderSuccess()
             }
             is UiState.Error -> {
-                val error = (orderState as UiState.Error).message
-                context.showToast(error)
+                context.showToast((orderState as UiState.Error).message)
             }
-            else -> {}
+            else -> Unit
         }
     }
 
-    Card(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        )
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(24.dp)
+                .padding(20.dp)
         ) {
+
+            // 헤더
             Text(
                 text = if (side == OrderSide.BUY) "매수 주문" else "매도 주문",
-                style = MaterialTheme.typography.headlineSmall.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                color = if (side == OrderSide.BUY) Constants.Colors.RedUp
-                else Constants.Colors.BlueDown
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = if (side == OrderSide.BUY)
+                    Constants.Colors.RedUp else Constants.Colors.BlueDown
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             Text(
                 text = symbol,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Divider(modifier = Modifier.padding(vertical = 16.dp))
 
-            // 매도 시 보유 수량 표시
             if (side == OrderSide.SELL) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "보유 수량",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "${holdingQuantity.toFormattedNumber(2)}주",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "최대 판매 가능: ${holdingQuantity.toFormattedNumber(2)}주",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                InfoRow(
+                    label = "보유 수량",
+                    value = "${holdingQuantity.toFormattedNumber(2)}주",
+                    highlight = true
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
-            }
+                Spacer(modifier = Modifier.height(4.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("현재가", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    currentPrice.toFormattedCurrency(currency),
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
+                    text = "최대 판매 가능 수량입니다",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                 )
+
+                Divider(modifier = Modifier.padding(vertical = 16.dp))
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            InfoRow(
+                label = "현재가",
+                value = currentPrice.toFormattedCurrency(currency)
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
 
             OutlinedTextField(
                 value = quantity,
@@ -237,52 +192,36 @@ fun OrderConfirmScreen(
                 supportingText = {
                     if (isQuantityExceeded) {
                         Text(
-                            "⚠️ 보유 수량을 초과할 수 없습니다",
+                            "보유 수량을 초과할 수 없습니다",
                             color = MaterialTheme.colorScheme.error
                         )
                     }
                 }
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("주문 금액", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    totalAmount.toFormattedCurrency(currency),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            InfoRow(
+                label = "주문 금액",
+                value = totalAmount.toFormattedCurrency(currency),
+                highlight = true
+            )
+
+            authResponse?.let {
+                val cash = if (currency == Currency.KRW) it.cashKrw else it.cashUsd
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                InfoRow(
+                    label = "보유 현금",
+                    value = cash.toFormattedCurrency(currency),
+                    subtle = true
                 )
-            }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            authResponse?.let { auth ->
-                val availableCash =
-                    if (currency == Currency.KRW) auth.cashKrw else auth.cashUsd
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                if (side == OrderSide.BUY && totalAmount > cash) {
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        "보유 현금",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    )
-                    Text(
-                        availableCash.toFormattedCurrency(currency),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    )
-                }
-
-                if (side == OrderSide.BUY && totalAmount > availableCash) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "⚠️ 잔액이 부족합니다",
+                        text = "잔액이 부족합니다",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -297,7 +236,9 @@ fun OrderConfirmScreen(
             ) {
                 OutlinedButton(
                     onClick = onDismiss,
-                    modifier = Modifier.weight(1f).height(56.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp),
                     enabled = orderState !is UiState.Loading
                 ) {
                     Text("취소")
@@ -305,40 +246,41 @@ fun OrderConfirmScreen(
 
                 Button(
                     onClick = {
-                        val uid = authViewModel.uid ?: return@Button
-
+                        val userId = authViewModel.uid ?: return@Button
                         orderViewModel.createOrder(
-                            uid = uid,
+                            uid = userId,
                             symbol = symbol,
                             side = side,
                             quantity = quantityDouble,
                             exchange = exchange,
-                            onBalanceUpdate = { cur, totalAmount ->
+                            onBalanceUpdate = { cur, amount ->
                                 if (side == OrderSide.BUY) {
                                     if (cur == Currency.KRW) {
                                         authViewModel.updateBalance(
-                                            cashKrw = (authResponse?.cashKrw ?: 0.0) - totalAmount
+                                            cashKrw = (authResponse?.cashKrw ?: 0.0) - amount
                                         )
                                     } else {
                                         authViewModel.updateBalance(
-                                            cashUsd = (authResponse?.cashUsd ?: 0.0) - totalAmount
+                                            cashUsd = (authResponse?.cashUsd ?: 0.0) - amount
                                         )
                                     }
                                 } else {
                                     if (cur == Currency.KRW) {
                                         authViewModel.updateBalance(
-                                            cashKrw = (authResponse?.cashKrw ?: 0.0) + totalAmount
+                                            cashKrw = (authResponse?.cashKrw ?: 0.0) + amount
                                         )
                                     } else {
                                         authViewModel.updateBalance(
-                                            cashUsd = (authResponse?.cashUsd ?: 0.0) + totalAmount
+                                            cashUsd = (authResponse?.cashUsd ?: 0.0) + amount
                                         )
                                     }
                                 }
                             }
                         )
                     },
-                    modifier = Modifier.weight(1f).height(56.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp),
                     enabled = orderState !is UiState.Loading &&
                             quantityDouble > 0 &&
                             !isQuantityExceeded,
@@ -349,19 +291,46 @@ fun OrderConfirmScreen(
                 ) {
                     if (orderState is UiState.Loading) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = Color.White
+                            modifier = Modifier.size(22.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
                         )
                     } else {
                         Text(
                             if (side == OrderSide.BUY) "매수 확정" else "매도 확정",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold
-                            )
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun InfoRow(
+    label: String,
+    value: String,
+    highlight: Boolean = false,
+    subtle: Boolean = false
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = when {
+                subtle -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                else -> MaterialTheme.colorScheme.onSurface
+            }
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontWeight = if (highlight) FontWeight.Bold else FontWeight.Medium
+            )
+        )
     }
 }

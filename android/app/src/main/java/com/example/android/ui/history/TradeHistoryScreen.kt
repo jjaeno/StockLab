@@ -55,7 +55,6 @@ class TradeHistoryViewModel @Inject constructor(
             repository.getUserOrders(uid).collect { result ->
                 when (result) {
                     is ApiResult.Success -> {
-                        // 날짜순 정렬 (최신순)
                         _orders.value = result.data.sortedByDescending { it.createdAt }
                         _isLoading.value = false
                     }
@@ -76,9 +75,6 @@ class TradeHistoryViewModel @Inject constructor(
     }
 }
 
-/**
- * 거래내역 화면
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TradeHistoryScreen(
@@ -110,33 +106,34 @@ fun TradeHistoryScreen(
             TopAppBar(
                 title = {
                     Text(
-                        "거래내역",
+                        text = "거래내역",
                         fontWeight = FontWeight.Bold
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = Color.White
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
         }
     ) { paddingValues ->
         SwipeRefresh(
             state = swipeRefreshState,
-            onRefresh = {
-                uid?.let { viewModel.loadOrders(it) }
-            },
+            onRefresh = { uid?.let { viewModel.loadOrders(it) } },
             modifier = Modifier.padding(paddingValues)
         ) {
             if (orders.isEmpty() && !isLoading) {
-                EmptyOrdersCard()
+                EmptyOrdersSection()
             } else {
                 LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
-                    items(orders) { order ->
-                        OrderHistoryCard(order = order)
+                    items(
+                        items = orders,
+                        key = { it.id }
+                    ) { order ->
+                        OrderHistoryItem(order = order)
                     }
                 }
             }
@@ -144,182 +141,171 @@ fun TradeHistoryScreen(
     }
 }
 
-/**
- * 주문 내역 카드
- */
 @Composable
-private fun OrderHistoryCard(order: OrderEntity) {
+private fun OrderHistoryItem(order: OrderEntity) {
     val stockName = StockData.getStockName(order.symbol)
     val currency = if (order.symbol.isDomesticStock()) Currency.KRW else Currency.USD
     val totalAmount = order.price * order.quantity
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(2.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (order.side == OrderSide.BUY) {
-                Color(0xFFFFF3F3)
-            } else {
-                Color(0xFFF0F8FF)
-            }
-        )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
+
+        // 1️⃣ 상단: 종목 + 매수/매도
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            // 헤더: 종목 이름 + 매수/매도
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stockName,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold
-                        )
+            Column {
+                Text(
+                    text = stockName,
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = FontWeight.Bold
                     )
-                    Text(
-                        text = order.symbol,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    )
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (order.side == OrderSide.BUY) {
-                        Constants.Colors.RedUp
-                    } else {
-                        Constants.Colors.BlueDown
-                    },
-                    modifier = Modifier.padding(start = 8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = if (order.side == OrderSide.BUY)
-                                Icons.Default.TrendingUp else Icons.Default.TrendingDown,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = order.side.koreanName,
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 거래 정보
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                InfoItem(
-                    label = "수량",
-                    value = "${order.quantity.toFormattedNumber(2)}주"
                 )
-                InfoItem(
-                    label = "가격",
-                    value = order.price.toFormattedCurrency(currency)
-                )
-                InfoItem(
-                    label = "총 금액",
-                    value = totalAmount.toFormattedCurrency(currency),
-                    valueColor = if (order.side == OrderSide.BUY) {
-                        Constants.Colors.RedUp
-                    } else {
-                        Constants.Colors.BlueDown
-                    }
+                Text(
+                    text = order.symbol,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            SideBadge(order.side)
+        }
 
-            // 거래 일시
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // 2️⃣ 중단: 수량 + 가격 (한 줄)
+        Text(
+            text = "수량 ${order.quantity.toFormattedNumber(2)}주 · " +
+                    "가격 ${order.price.toFormattedCurrency(currency)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // 3️⃣ 총액 (가장 강조)
+        Text(
+            text = totalAmount.toFormattedCurrency(currency),
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.Bold
+            ),
+            color = if (order.side == OrderSide.BUY)
+                Constants.Colors.RedUp
+            else
+                Constants.Colors.BlueDown
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // 4️⃣ 날짜 (footer)
+        Text(
+            text = order.createdAt.toFormattedDateTime(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+        )
+
+        Divider(
+            modifier = Modifier.padding(top = 12.dp),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+        )
+    }
+}
+
+
+@Composable
+private fun SideBadge(side: OrderSide) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = if (side == OrderSide.BUY)
+            Constants.Colors.RedUp
+        else
+            Constants.Colors.BlueDown
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (side == OrderSide.BUY)
+                    Icons.Default.TrendingUp
+                else
+                    Icons.Default.TrendingDown,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
             Text(
-                text = "거래일: ${order.createdAt.toFormattedDateTime()}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                text = side.koreanName,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
             )
         }
     }
 }
 
-/**
- * 정보 아이템
- */
 @Composable
-private fun InfoItem(
+private fun HistoryInfo(
     label: String,
     value: String,
-    valueColor: Color = MaterialTheme.colorScheme.onSurface
+    highlight: Boolean = false,
+    highlightColor: Color = MaterialTheme.colorScheme.onSurface
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             text = label,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
         )
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = value,
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontWeight = FontWeight.Bold
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontWeight = if (highlight) FontWeight.Bold else FontWeight.Medium
             ),
-            color = valueColor
+            color = if (highlight) highlightColor
+            else MaterialTheme.colorScheme.onSurface
         )
     }
 }
 
-/**
- * 빈 거래내역 카드
- */
 @Composable
-private fun EmptyOrdersCard() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
+private fun EmptyOrdersSection() {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 32.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
     ) {
         Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(32.dp)
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Icon(
-                Icons.Default.TrendingUp,
+                imageVector = Icons.Default.TrendingUp,
                 contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                modifier = Modifier.size(48.dp),
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
             )
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = "거래 내역이 없습니다",
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "첫 거래를 시작해보세요",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
             )
         }
     }
