@@ -64,6 +64,14 @@ interface ApiService {
         @Query("exchange") exchange: String? = null
     ): Response<ApiResponse<CandleResponse>>
 
+    /**
+     * 다중 종목 시세 일괄 조회
+     * POST /quotes/batch
+     */
+    @POST("quotes/batch")
+    suspend fun getBatchQuotes(
+        @Body request: BatchQuoteRequest
+    ): Response<ApiResponse<BatchQuoteResponse>>
     // ==========================================
     // 주문 API (UID 필요 - Header)
     // ==========================================

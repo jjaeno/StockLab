@@ -28,11 +28,12 @@ import com.example.android.viewmodel.MainViewModel
 import android.util.Log
 
 /**
- * 메인 화면 (API 호출 최적화 완료)
+ * 메인 화면 (리팩토링 완료)
  *
- *  UI에서는 API 호출 없음 - StateFlow만 구독
- *  ViewModel에서 10초마다 자동 갱신
- *  스크롤해도 추가 네트워크 호출 없음
+ * ⭐ 핵심 개선:
+ * - QuoteResult.status 처리 (SUCCESS/FAILED/CACHED)
+ * - 실패 시 lastKnownPrice 표시
+ * - API 재호출 방지
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,7 +46,7 @@ fun MainScreen(
     val context = LocalContext.current
     val authResponse by authViewModel.authResponse.collectAsState()
 
-    //  StateFlow 구독만
+    // ⭐ StateFlow 구독만
     val watchlist by mainViewModel.watchlist.collectAsState()
     val watchlistQuotes by mainViewModel.watchlistQuotes.collectAsState()
     val searchQuery by mainViewModel.searchQuery.collectAsState()
@@ -55,17 +56,16 @@ fun MainScreen(
     val isLoading by mainViewModel.isLoading.collectAsState()
     val errorMessage by mainViewModel.errorMessage.collectAsState()
 
-    // remember로 한 번만 실행
+    // 초기화 (한 번만)
     val hasInitialized = remember { mutableStateOf(false) }
-    // UID 설정 (한 번만)
     LaunchedEffect(authResponse?.uid) {
         authResponse?.uid?.let { uid ->
             if (!hasInitialized.value) {
-                Log.i("MainScreen","MainScreen 초기화: UID=$uid")
+                Log.i("MainScreen", "MainScreen 초기화: UID=$uid")
                 mainViewModel.setUid(uid)
                 hasInitialized.value = true
             } else {
-                Log.d("MainScreen","⏭MainScreen 이미 초기화됨, 스킵")
+                Log.d("MainScreen", "⏭ MainScreen 이미 초기화됨, 스킵")
             }
         }
     }
@@ -144,7 +144,7 @@ fun MainScreen(
                     items(
                         items = searchResults,
                         key = { "search_${it.market}_${it.symbol}" }
-                        ) { stock ->
+                    ) { stock ->
                         SearchResultItem(
                             stock = stock,
                             onClick = {
@@ -208,29 +208,32 @@ fun MainScreen(
                             EmptyWatchlistCard()
                         }
                     } else {
-                        // 관심종목 표시 (API 호출 없음!)
+                        // ⭐ 관심종목 표시 (QuoteResult 사용)
                         items(
                             items = watchlist,
                             key = { "${it.exchange ?: "NONE"}_${it.symbol}" }
                         ) { item ->
-                            val quote = watchlistQuotes[item.symbol]
+                            val quoteResult = watchlistQuotes[item.symbol]  // ⭐ QuoteResult
                             val stockName = item.getDisplayName()
                             val isInWatchlist = true
 
                             EnhancedStockItemCard(
                                 symbol = item.symbol,
                                 name = stockName,
-                                quote = quote,
+                                quoteResult = quoteResult,  // ⭐ QuoteResult 전달
                                 isInWatchlist = isInWatchlist,
                                 onClick = {
-                                    quote?.let {
+                                    // 성공한 경우에만 상세화면 이동
+                                    quoteResult?.data?.let { quote ->
                                         onStockClick(
                                             StockDetail(
                                                 symbol = item.symbol,
                                                 name = stockName,
                                                 exchange = item.exchange,
-                                                stockType = it.stockType,
-                                                currency = it.currency
+                                                stockType = if (item.symbol.isDomesticStock())
+                                                    StockType.DOMESTIC else StockType.OVERSEAS,
+                                                currency = if (item.symbol.isDomesticStock())
+                                                    Currency.KRW else Currency.USD
                                             )
                                         )
                                     }
@@ -276,7 +279,8 @@ fun MainScreen(
                         val quote = allStockQuotes[stock.symbol]
                         val isInWatchlist = watchlist.any { it.symbol == stock.symbol }
 
-                        EnhancedStockItemCard(
+                        // 전체 종목은 기존 방식 유지 (UnifiedQuoteResponse)
+                        EnhancedStockItemCardOld(
                             symbol = stock.symbol,
                             name = stock.name,
                             quote = quote,
@@ -315,13 +319,13 @@ fun MainScreen(
 }
 
 /**
- * 개선된 종목 카드 (API 호출 제거)
+ * ⭐ 개선된 종목 카드 (QuoteResult.status 처리)
  */
 @Composable
 private fun EnhancedStockItemCard(
     symbol: String,
     name: String,
-    quote: UnifiedQuoteResponse?,
+    quoteResult: QuoteResult?,
     isInWatchlist: Boolean,
     onClick: () -> Unit,
     onToggleWatchlist: () -> Unit
@@ -330,7 +334,7 @@ private fun EnhancedStockItemCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clickable(onClick = onClick, enabled = quote != null),
+            .clickable(onClick = onClick, enabled = quoteResult?.data != null),
         shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
@@ -356,7 +360,179 @@ private fun EnhancedStockItemCard(
                 )
             }
 
-            // 중간: 가격 정보
+            // ⭐ 중간: 가격 정보 (status에 따라 처리)
+            when {
+                quoteResult == null -> {
+                    // 로딩 중
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .size(24.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
+                quoteResult.status == ResultStatus.SUCCESS -> {
+                    // ✅ 성공: 정상 표시
+                    val quote = quoteResult.data!!
+                    val currency = if (symbol.isDomesticStock()) Currency.KRW else Currency.USD
+
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        horizontalAlignment = Alignment.End
+                    ) {
+                        Text(
+                            text = quote.currentPrice.toFormattedCurrency(currency),
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = quote.change.toFormattedChange(currency),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = quote.change.getPriceChangeColor()
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = quote.percentChange.toFormattedPercent(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = quote.change.getPriceChangeColor()
+                            )
+                        }
+                    }
+                }
+                quoteResult.status == ResultStatus.FAILED -> {
+                    // ⚠️ 실패: last-known-good or 플레이스홀더
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        horizontalAlignment = Alignment.End
+                    ) {
+                        if (quoteResult.lastKnownPrice != null) {
+                            // last-known-good 가격 표시
+                            val currency = if (symbol.isDomesticStock()) Currency.KRW else Currency.USD
+                            Text(
+                                text = quoteResult.lastKnownPrice.toFormattedCurrency(currency),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            )
+                            Text(
+                                text = "마지막 시세",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                            )
+                        } else {
+                            // 에러 아이콘 표시
+                            Icon(
+                                Icons.Default.Error,
+                                contentDescription = "조회 실패",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Text(
+                                text = when (quoteResult.reason) {
+                                    "TIMEOUT" -> "시간 초과"
+                                    "RATE_LIMIT" -> "제한 초과"
+                                    "API_ERROR" -> "API 오류"
+                                    else -> "오류"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+                quoteResult.status == ResultStatus.CACHED -> {
+                    // 📦 캐시된 데이터 (SUCCESS와 동일하게 표시)
+                    val quote = quoteResult.data!!
+                    val currency = if (symbol.isDomesticStock()) Currency.KRW else Currency.USD
+
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        horizontalAlignment = Alignment.End
+                    ) {
+                        Text(
+                            text = quote.currentPrice.toFormattedCurrency(currency),
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Cached,
+                                contentDescription = "캐시",
+                                modifier = Modifier.size(12.dp),
+                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = quote.change.toFormattedChange(currency),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = quote.change.getPriceChangeColor()
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 오른쪽: 관심종목 토글
+            IconButton(
+                onClick = onToggleWatchlist,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = if (isInWatchlist) Icons.Default.Star else Icons.Default.StarBorder,
+                    contentDescription = if (isInWatchlist) "관심종목 삭제" else "관심종목 추가",
+                    tint = if (isInWatchlist) Color(0xFFFFC107)
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 기존 종목 카드 (전체 종목용 - UnifiedQuoteResponse 사용)
+ */
+@Composable
+private fun EnhancedStockItemCardOld(
+    symbol: String,
+    name: String,
+    quote: UnifiedQuoteResponse?,
+    isInWatchlist: Boolean,
+    onClick: () -> Unit,
+    onToggleWatchlist: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clickable(onClick = onClick, enabled = quote != null),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Text(
+                    text = symbol,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+
             if (quote != null) {
                 Column(
                     modifier = Modifier.padding(horizontal = 12.dp),
@@ -393,7 +569,6 @@ private fun EnhancedStockItemCard(
                 )
             }
 
-            // 오른쪽: 관심종목 토글
             IconButton(
                 onClick = onToggleWatchlist,
                 modifier = Modifier.size(40.dp)
@@ -401,7 +576,8 @@ private fun EnhancedStockItemCard(
                 Icon(
                     imageVector = if (isInWatchlist) Icons.Default.Star else Icons.Default.StarBorder,
                     contentDescription = if (isInWatchlist) "관심종목 삭제" else "관심종목 추가",
-                    tint = if (isInWatchlist) Color(0xFFFFC107) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                    tint = if (isInWatchlist) Color(0xFFFFC107)
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                 )
             }
         }

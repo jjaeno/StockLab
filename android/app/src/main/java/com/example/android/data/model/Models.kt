@@ -88,6 +88,40 @@ enum class StockType {
     @SerializedName("DOMESTIC") DOMESTIC,
     @SerializedName("OVERSEAS") OVERSEAS
 }
+// Models.kt에 추가
+
+// 다중 조회 요청
+data class BatchQuoteRequest(
+    @SerializedName("symbols") val symbols: List<String>
+)
+
+// 다중 조회 응답
+data class BatchQuoteResponse(
+    @SerializedName("results") val results: List<QuoteResult>,
+    @SerializedName("totalRequested") val totalRequested: Int,
+    @SerializedName("successCount") val successCount: Int,
+    @SerializedName("failedCount") val failedCount: Int,
+    @SerializedName("cachedCount") val cachedCount: Int,
+    @SerializedName("timestamp") val timestamp: Long
+)
+
+// 개별 종목 결과
+data class QuoteResult(
+    @SerializedName("symbol") val symbol: String,
+    @SerializedName("status") val status: ResultStatus,
+    @SerializedName("data") val data: QuoteResponse?,
+    @SerializedName("reason") val reason: String?,
+    @SerializedName("lastKnownPrice") val lastKnownPrice: Double?,
+    @SerializedName("source") val source: String,
+    @SerializedName("cached") val cached: Boolean,
+    @SerializedName("fetchedAt") val fetchedAt: Long
+)
+
+enum class ResultStatus {
+    @SerializedName("SUCCESS") SUCCESS,
+    @SerializedName("FAILED") FAILED,
+    @SerializedName("CACHED") CACHED
+}
 
 // ==========================================
 // 주문 관련 모델

@@ -3,6 +3,7 @@ package com.example.android.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.android.data.api.ApiResult
+import com.example.android.data.local.QuoteCache
 import com.example.android.data.model.*
 import com.example.android.data.repository.StockLabRepository
 import com.example.android.util.StockData
@@ -13,20 +14,26 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import android.util.Log
 
 /**
  * 메인 화면 ViewModel (개선 ver. - API 호출 최적화)
  *
- * 1. 관심종목 + 시세를 한 번에 로드 (다중 조회 API 사용)
- * 2. 10초 주기로 자동 갱신
- * 3. UI에서는 API 호출 없이 StateFlow만 구독
+ * 1. 다중 조회 API 사용 (/quotes/batch)
+ * 2. 응답 누락 0% (status로 구분)
+ * 3. 화면 재진입/스크롤 시 재호출 방지 (hasInitialized)
+ * 4. 로컬 캐시 + last-known-good 폴백
+ * 5. 30초 주기 자동 갱신 (백그라운드)
  */
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val repository: StockLabRepository,
+    private val quoteCache: QuoteCache
 ) : ViewModel() {
 
     private var currentUid: String? = null
+    // 초기화 플래그 (중복 호출 방지)
+    private val hasInitialized = MutableStateFlow(false)
     private var watchlistRefreshJob: Job? = null
     private var allStocksRefreshJob: Job? = null
 
@@ -37,9 +44,9 @@ class MainViewModel @Inject constructor(
     private val _watchlist = MutableStateFlow<List<WatchlistItem>>(emptyList())
     val watchlist: StateFlow<List<WatchlistItem>> = _watchlist.asStateFlow()
 
-    // 관심종목 시세 (Map<Symbol, Quote>)
-    private val _watchlistQuotes = MutableStateFlow<Map<String, UnifiedQuoteResponse>>(emptyMap())
-    val watchlistQuotes: StateFlow<Map<String, UnifiedQuoteResponse>> = _watchlistQuotes.asStateFlow()
+    // 관심종목 시세 (Map<Symbol, QuoteResult>)
+    private val _watchlistQuotes = MutableStateFlow<Map<String, QuoteResult>>(emptyMap())
+    val watchlistQuotes: StateFlow<Map<String, QuoteResult>> = _watchlistQuotes.asStateFlow()
 
     private val _searchResults = MutableStateFlow<List<StockSearchResult>>(emptyList())
     val searchResults: StateFlow<List<StockSearchResult>> = _searchResults.asStateFlow()
@@ -73,22 +80,35 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    /**
+     * UID 설정 (최초 1회만)
+     */
     fun setUid(uid: String) {
-        if (currentUid == uid && _watchlist.value.isNotEmpty()) return
+        if (currentUid == uid && hasInitialized.value) return
+
         currentUid = uid
+        hasInitialized.value = true
 
-        // 1) 초기 1회 로드
-        loadAllStockQuotes()
+        // 관심종목
         loadWatchlistWithQuotes()
+        startPeriodicRefresh()
 
-        // 2) 주기 갱신 시작
+        // 전체 종목 시세
+        loadAllStockQuotes()
         startAllStocksRefresh()
-        startWatchlistRefresh()
     }
 
     /**
-     * 핵심 메서드: 관심종목 + 시세 한 번에 로드
-     */
+    * 핵심 메서드: 관심종목 + 시세 일괄 조회
+    *
+    * 흐름:
+    * 1. 관심종목 목록 조회
+    * 2. POST /quotes/batch로 한 번에 시세 조회
+    * 3. QuoteResult.status에 따라 처리:
+    *    - SUCCESS: 정상 표시
+    *    - FAILED: lastKnownPrice or 플레이스홀더
+    *    - CACHED: 캐시 데이터 사용
+    */
     private fun loadWatchlistWithQuotes() {
         val uid = currentUid ?: return
 
@@ -103,49 +123,85 @@ class MainViewModel @Inject constructor(
                             val items = result.data.items
                             _watchlist.value = items
 
-                            if (items.isNotEmpty()) {
-                                // 2. 심볼 리스트 생성 (쉼표 구분)
-                                val symbols = items.joinToString(",") { it.symbol }
+                            if (items.isEmpty()) {
+                                _watchlistQuotes.value = emptyMap()
+                                _isLoading.value = false
+                                return@collect
+                            }
 
-                                // 3. 다중 시세 조회 (단일 API 호출!)
-                                repository.getMultipleQuotes(symbols).collect { quotesResult ->
-                                    when (quotesResult) {
-                                        is ApiResult.Success -> {
-                                            // 4. Map으로 변환하여 저장
-                                            val quotesMap = quotesResult.data.associateBy { it.quote.symbol }
-                                            _watchlistQuotes.value = quotesMap
+                            // 2. 심볼 리스트 생성
+                            val symbols = items.map { it.symbol }
+
+                            Log.i("MainViewModel", "다중 시세 조회 시작: ${symbols.size}건")
+
+                            // 3. ⭐ 다중 시세 일괄 조회 (POST /quotes/batch)
+                            repository.getBatchQuotes(symbols).collect { batchResult ->
+                                when (batchResult) {
+                                    is ApiResult.Success -> {
+                                        val batchResponse = batchResult.data
+
+                                        Log.i("MainViewModel",
+                                            "다중 시세 조회 완료: 총 ${batchResponse.totalRequested}건, " +
+                                                    "성공 ${batchResponse.successCount}건, " +
+                                                    "실패 ${batchResponse.failedCount}건"
+                                        )
+
+                                        // 4. ⭐ 검증: 응답 개수 확인
+                                        if (batchResponse.results.size != symbols.size) {
+                                            Log.e("MainViewModel",
+                                                "❌ 응답 누락! 요청: ${symbols.size}, 응답: ${batchResponse.results.size}"
+                                            )
                                         }
-                                        is ApiResult.Error -> {
-                                            _errorMessage.value = quotesResult.message
+
+                                        // 5. Map으로 변환
+                                        val quotesMap = batchResponse.results.associateBy { it.symbol }
+
+                                        // 6. 성공한 결과는 로컬 캐시에 저장
+                                        batchResponse.results.forEach { quoteResult ->
+                                            if (quoteResult.status == ResultStatus.SUCCESS) {
+                                                quoteCache.saveSuccess(quoteResult.symbol, quoteResult)
+                                            }
                                         }
-                                        is ApiResult.Loading -> {}
+
+                                        _watchlistQuotes.value = quotesMap
+                                        _isLoading.value = false
+                                    }
+                                    is ApiResult.Error -> {
+                                        _errorMessage.value = batchResult.message
+                                        _isLoading.value = false
+                                    }
+                                    is ApiResult.Loading -> {
+                                        // 이미 로딩 중
                                     }
                                 }
-                            } else {
-                                // 관심종목이 없으면 빈 맵
-                                _watchlistQuotes.value = emptyMap()
                             }
                         }
                         is ApiResult.Error -> {
                             _errorMessage.value = result.message
+                            _isLoading.value = false
                         }
-                        is ApiResult.Loading -> {}
+                        is ApiResult.Loading -> {
+                            // 이미 로딩 중
+                        }
                     }
                 }
-            } finally {
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "시세 조회 실패", e)
+                _errorMessage.value = e.localizedMessage
                 _isLoading.value = false
             }
         }
     }
 
     /**
-     * 10초마다 자동 갱신
+     * 30초 주기 자동 갱신
      */
     private fun startPeriodicRefresh() {
         refreshJob?.cancel()
         refreshJob = viewModelScope.launch {
             while (isActive) {
-                delay(10_000L) // 10초
+                delay(30_000L) // 30초
+                Log.d("MainViewModel", "백그라운드 갱신 시작")
                 loadWatchlistWithQuotes()
             }
         }
@@ -155,8 +211,8 @@ class MainViewModel @Inject constructor(
      * 수동 새로고침 (SwipeRefresh용)
      */
     fun refresh() {
+        Log.i("MainViewModel", "수동 새로고침")
         loadWatchlistWithQuotes()
-        loadTopStockQuotes()
     }
 
     /**
@@ -293,7 +349,6 @@ class MainViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        watchlistRefreshJob?.cancel()
-        allStocksRefreshJob?.cancel()
+        refreshJob?.cancel()
     }
 }

@@ -4,6 +4,8 @@ import lombok.*;
 import java.math.BigDecimal;
 import java.util.List;
 
+import jakarta.validation.constraints.NotEmpty;
+
 /**
  * 시세 관련 DTO 클래스들
  */
@@ -44,5 +46,48 @@ public class QuoteDto {
         private List<Double> low;
         private List<Double> close;
         private List<Long> volume;
+    }
+
+    // 배치 시세 요청/응답 DTO
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class QuoteResult {
+        private String symbol;
+        private ResultStatus status;  // SUCCESS, FAILED, CACHED
+        private QuoteResponse data;
+        private String reason;  // TIMEOUT, RATE_LIMIT, PARSE_ERROR, API_ERROR
+        private BigDecimal lastKnownPrice;  // 실패 시 마지막 성공값
+        private String source;  // KIS, CACHE, LAST_KNOWN
+        private boolean cached;
+        private Long fetchedAt;
+    }
+
+    public enum ResultStatus {
+        SUCCESS,
+        FAILED,
+        CACHED
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class BatchQuoteRequest {
+        @NotEmpty
+        private List<String> symbols;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class BatchQuoteResponse {
+        private List<QuoteResult> results;
+        private int totalRequested;
+        private int successCount;
+        private int failedCount;
+        private int cachedCount;
+        private Long timestamp;
     }
 }

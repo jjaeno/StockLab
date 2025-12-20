@@ -72,6 +72,16 @@ class StockLabRepository @Inject constructor(
         emit(result)
     }.flowOn(Dispatchers.IO)
 
+    /**
+     * 다중 종목 시세 일괄 조회
+     */
+    fun getBatchQuotes(symbols: List<String>): Flow<ApiResult<BatchQuoteResponse>> = flow {
+        emit(ApiResult.Loading)
+
+        val result = api.getBatchQuotes(BatchQuoteRequest(symbols)).toApiResult()
+        emit(result)
+    }.flowOn(Dispatchers.IO)
+
     // ==========================================
     // 주문 API
     // ==========================================
