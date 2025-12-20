@@ -407,40 +407,110 @@ private fun ForecastSection(
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier) {
+
         Text(
-            text = "이슈 요약",
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            text = "AI 시장 분석",
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.Bold
+            )
         )
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        when (result) {
-            is ApiResult.Loading -> {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-            }
-            is ApiResult.Error -> {
-                Text(
-                    text = "요약을 불러오지 못했습니다",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
-                )
-            }
-            is ApiResult.Success -> {
-                Text(
-                    text = result.data.summary,
-                    style = MaterialTheme.typography.bodyMedium,
-                    lineHeight = 20.sp
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "${result.data.direction.toKorean()} 전망 · 신뢰도 ${(result.data.confidence * 100).toInt()}%",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                )
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+            tonalElevation = 0.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            when (result) {
+                is ApiResult.Loading -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                }
+
+                is ApiResult.Error -> {
+                    Text(
+                        text = "AI 시장 분석을 불러오지 못했습니다",
+                        modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                    )
+                }
+
+                is ApiResult.Success -> {
+                    val data = result.data
+                    val directionColor = when (data.direction) {
+                        ForecastDirection.UP -> Constants.Colors.RedUp
+                        ForecastDirection.DOWN -> Constants.Colors.BlueDown
+                        ForecastDirection.NEUTRAL -> MaterialTheme.colorScheme.onSurface
+                        ForecastDirection.UNCERTAIN -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    }
+
+
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        // 🔹 요약 본문
+                        Text(
+                            text = data.summary,
+                            style = MaterialTheme.typography.bodyMedium,
+                            lineHeight = 20.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Divider(
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // 🔹 전망 결과 강조 영역
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = directionColor.copy(alpha = 0.12f)
+                            ) {
+                                Text(
+                                    text = data.direction.toKorean(),
+                                    modifier = Modifier.padding(
+                                        horizontal = 10.dp,
+                                        vertical = 4.dp
+                                    ),
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = directionColor
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Text(
+                                text = "전망 · 신뢰도 ${(data.confidence * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 }
+
 
 @Composable
 private fun NewsSection(

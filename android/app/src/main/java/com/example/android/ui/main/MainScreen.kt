@@ -689,7 +689,7 @@ private fun HotStocksSection(
                 .padding(horizontal = 14.dp, vertical = 12.dp)
         ) {
             Text(
-                text = "이슈 종목",
+                text = "AI가 주목한 종목",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                 fontSize = 16.sp
             )
