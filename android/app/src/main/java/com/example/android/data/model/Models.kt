@@ -342,3 +342,11 @@ data class GptForecastResponse(
     val usedArticles: List<UsedArticle>,
     val model: String
 )
+
+data class HotStockItem(
+    val symbol: String,
+    val displayName: String,
+    val reason: String,
+    val risk: String,
+    val rank: Int
+)

@@ -30,7 +30,7 @@ import android.util.Log
 /**
  * 메인 화면 (리팩토링 완료)
  *
- * ⭐ 핵심 개선:
+ * 핵심 개선:
  * - QuoteResult.status 처리 (SUCCESS/FAILED/CACHED)
  * - 실패 시 lastKnownPrice 표시
  * - API 재호출 방지
@@ -119,6 +119,32 @@ fun MainScreen(
                         )
                     }
                 }
+                // 핫스톡 섹션
+                item {
+                    val hotStocksList by mainViewModel.hotStocks.collectAsState()
+                    if (hotStocksList.isNotEmpty()) {
+                        HotStocksSection(
+                            items = hotStocksList,
+                            onItemClick = { item ->
+                                val stockType = if (item.symbol.isDomesticStock())
+                                    StockType.DOMESTIC else StockType.OVERSEAS
+                                val currency = if (stockType == StockType.DOMESTIC)
+                                    Currency.KRW else Currency.USD
+
+                                onStockClick(
+                                    StockDetail(
+                                        symbol = item.symbol,
+                                        name = item.displayName,
+                                        exchange = null,
+                                        stockType = stockType,
+                                        currency = currency
+                                    )
+                                )
+                            }
+                        )
+                    }
+                }
+
 
                 // 검색바
                 item {
@@ -653,6 +679,7 @@ private fun BalanceCard(
     }
 }
 
+
 @Composable
 private fun SearchBar(
     query: String,
@@ -758,6 +785,125 @@ private fun EmptyWatchlistCard() {
                     text = "관심종목이 없습니다",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HotStocksSection(
+    items: List<HotStockItem>,
+    onItemClick: (HotStockItem) -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "AI 주목 종목",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Text(
+                    text = "뉴스 이슈 기반",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            items.forEach { item ->
+                HotStockItemCard(
+                    item = item,
+                    onClick = { onItemClick(item) }
+                )
+                if (item != items.last()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HotStockItemCard(
+    item: HotStockItem,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            Surface(
+                modifier = Modifier.size(36.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "${item.rank}",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.displayName,
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Text(
+                    text = item.symbol,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "주목: ${item.reason}",
+                    style = MaterialTheme.typography.bodySmall,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = "리스크: ${item.risk}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }
         }

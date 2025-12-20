@@ -104,4 +104,24 @@ public class AiDto {
             private Integer completion_tokens;
         }
     }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class HotStockItem {
+        private String symbol;
+        private String displayName;
+        private String reason;
+        private String risk;
+        private int rank;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class HotStocksResponse {
+        private List<HotStockItem> items;
+    }
 }

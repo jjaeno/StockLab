@@ -188,6 +188,13 @@ interface ApiService {
     suspend fun getGptForecast(
         @Body request: GptForecastRequest
     ): Response<ApiResponse<GptForecastResponse>>
+
+    /** 핫스톡 조회*/
+    @GET("analysis/hot-stocks")
+    suspend fun getHotStocks(
+        @Query("limit") limit: Int = 3,
+        @Query("symbols") symbols: String? = null
+    ): Response<ApiResponse<List<HotStockItem>>>
 }
 
 /**

@@ -39,7 +39,9 @@ class MainViewModel @Inject constructor(
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
-
+    // 주목종목 리스트
+    private val _hotStocks = MutableStateFlow<List<HotStockItem>>(emptyList())
+    val hotStocks: StateFlow<List<HotStockItem>> = _hotStocks.asStateFlow()
     // 관심종목 리스트
     private val _watchlist = MutableStateFlow<List<WatchlistItem>>(emptyList())
     val watchlist: StateFlow<List<WatchlistItem>> = _watchlist.asStateFlow()
@@ -91,6 +93,7 @@ class MainViewModel @Inject constructor(
 
         // 관심종목
         loadWatchlistWithQuotes()
+        loadHotStocks()
         startPeriodicRefresh()
 
         // 전체 종목 시세
@@ -213,6 +216,8 @@ class MainViewModel @Inject constructor(
     fun refresh() {
         Log.i("MainViewModel", "수동 새로고침")
         loadWatchlistWithQuotes()
+        loadTopStockQuotes()
+        loadHotStocks()
     }
 
     /**
@@ -251,6 +256,23 @@ class MainViewModel @Inject constructor(
                             result.message ?: "전체 종목 시세(batch)를 불러오지 못했습니다."
                     }
                     // 로딩 상태는 UI에 굳이 반영하지 않음
+                    else -> {}
+                }
+            }
+        }
+    }
+    // AI 주목 종목 로드
+    private fun loadHotStocks() {
+        viewModelScope.launch {
+            repository.getHotStocks(limit = 3).collect { result ->
+                when (result) {
+                    is ApiResult.Success -> {
+                        _hotStocks.value = result.data
+                        Log.i("MainViewModel", "AI 주목 종목: ${result.data.size}건")
+                    }
+                    is ApiResult.Error -> {
+                        Log.w("MainViewModel", "AI 주목 종목 조회 실패: ${result.message}")
+                    }
                     else -> {}
                 }
             }

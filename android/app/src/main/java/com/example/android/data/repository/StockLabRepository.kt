@@ -48,6 +48,15 @@ class StockLabRepository @Inject constructor(
             emit(ApiResult.Error(e.localizedMessage ?: "Unknown error"))
         }
     }
+    fun getHotStocks(limit: Int = 3, symbols: String? = null): Flow<ApiResult<List<HotStockItem>>> = flow {
+        emit(ApiResult.Loading)
+        try {
+            val response = api.getHotStocks(limit, symbols)
+            emit(response.toApiResult())
+        } catch (e: Exception) {
+            emit(ApiResult.Error(e.localizedMessage ?: "주목 종목 조회 실패"))
+        }
+    }.flowOn(Dispatchers.IO)
 
 
     // ==========================================
