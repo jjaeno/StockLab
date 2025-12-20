@@ -1,24 +1,28 @@
 package com.StockLab.backend.Quote;
 
+import com.StockLab.backend.common.BusinessException;
+import com.StockLab.backend.common.ErrorCode;
+import com.StockLab.backend.config.KisTokenManager;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.StockLab.backend.common.BusinessException;
-import com.StockLab.backend.common.ErrorCode;
-import com.StockLab.backend.config.KisTokenManager;
+import io.github.resilience4j.ratelimiter.RateLimiter;
+import io.github.resilience4j.ratelimiter.RateLimiterConfig;
+import io.github.resilience4j.reactor.ratelimiter.operator.RateLimiterOperator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
+import reactor.core.publisher.Flux;
 import java.time.Duration;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.Collectors;
 
 /**
  * 한국투자증권 해외주식 시세 조회 서비스
@@ -34,7 +38,6 @@ import java.util.stream.Collectors;
 @Slf4j
 public class KisOverseasQuoteService {
 
-    private final AtomicLong lastOverseasCallTime = new AtomicLong(0);
     private static final long MIN_CALL_INTERVAL_MS = 500; // VTS: 500ms 강제 대기
     
     private final WebClient webClient;
@@ -42,6 +45,7 @@ public class KisOverseasQuoteService {
     private final String appKey;
     private final String appSecret;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final RateLimiter overseasRateLimiter;
     
     // 60초 TTL 캐시
     private final Cache<String, QuoteDto.QuoteResponse> quoteCache;
@@ -59,23 +63,7 @@ public class KisOverseasQuoteService {
 
     
      //VTS Rate Limit 준수 (synchronized로 동시 호출 방지)
-    private synchronized void enforceRateLimit() {
-        long now = System.currentTimeMillis();
-        long elapsed = now - lastOverseasCallTime.get();
-        
-        if (elapsed < MIN_CALL_INTERVAL_MS) {
-            try {
-                long sleepTime = MIN_CALL_INTERVAL_MS - elapsed;
-                log.debug("⏱️ VTS Rate Limit: {}ms 대기", sleepTime);
-                Thread.sleep(sleepTime);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                log.warn("Rate limit sleep interrupted");
-            }
-        }
-        
-        lastOverseasCallTime.set(System.currentTimeMillis());
-    }
+    
 
     // 생성자
     public KisOverseasQuoteService(WebClient.Builder webClientBuilder,
@@ -87,6 +75,12 @@ public class KisOverseasQuoteService {
         this.appKey = appKey;
         this.tokenManager = tokenManager;
         this.appSecret = appSecret;
+        this.overseasRateLimiter = RateLimiter.of("kisOverseas",
+                RateLimiterConfig.custom()
+                        .limitRefreshPeriod(Duration.ofMillis(MIN_CALL_INTERVAL_MS))
+                        .limitForPeriod(1)
+                        .timeoutDuration(Duration.ofSeconds(1))
+                        .build());
         this.quoteCache = Caffeine.newBuilder()
                 .expireAfterWrite(60, TimeUnit.SECONDS)
                 .maximumSize(1000)
@@ -102,82 +96,67 @@ public class KisOverseasQuoteService {
      * @param exchange 거래소 코드 (예: NASDAQ, NYSE)
      * @return 현재가, 등락률 등
      */
+    
     public QuoteDto.QuoteResponse getOverseasQuote(String symbol, String exchange) {
+        return getOverseasQuoteAsync(symbol, exchange)
+                .timeout(Duration.ofSeconds(5))
+                .publishOn(Schedulers.boundedElastic())
+                .blockOptional()
+                .orElseThrow(() -> new BusinessException(ErrorCode.QUOTE_NOT_FOUND,
+                        "???? ?? ?? ??: " + symbol));
+    }
+
+    public Mono<QuoteDto.QuoteResponse> getOverseasQuoteAsync(String symbol, String exchange) {
         String cacheKey = exchange + ":" + symbol;
-        
-        // 캐시 확인
+
         QuoteDto.QuoteResponse cached = quoteCache.getIfPresent(cacheKey);
         if (cached != null) {
-            log.debug("캐시 히트: {} ({})", symbol, exchange);
-            return cached;
+            log.debug("?? ??: {} ({})", symbol, exchange);
+            return Mono.just(cached);
         }
-        
-        log.debug("해외주식 시세 조회: {} - {}", symbol, exchange);
-        
-        try {
-            QuoteDto.QuoteResponse quote = requestOverseasQuoteInternal(symbol, exchange);
-            // 유효한 가격인 경우에만 캐시에 저장
-            if (quote.getCurrentPrice().compareTo(BigDecimal.ZERO) > 0) {
-                quoteCache.put(cacheKey, quote);
-                log.info("해외주식 캐시 저장: {} ({}) - ${}",
-                        symbol, exchange, quote.getCurrentPrice());
-            } else {
-                log.warn("0인 응답은 캐시하지 않음: {} ({})", symbol, exchange);
-            }
-            return quote;
-            
-        } catch (Exception primaryException) {
-            if (!"NASDAQ".equalsIgnoreCase(exchange)) {
-                log.error("해외주식 시세 조회 실패: {} - {}", symbol, primaryException.getMessage());
-                throw new BusinessException(ErrorCode.QUOTE_NOT_FOUND,
-                        "해외주식 시세 조회 실패: " + symbol);
-            }
 
-            log.warn("NASDAQ 조회 실패, NYSE로 재시도: {}", symbol);
+        return Mono.defer(() -> {
+            String accessToken = tokenManager.getAccessToken();
+            String exchangeCode = getExchangeCode(exchange);
+            String cleanSymbol = cleanSymbol(symbol);
 
-            try {
-                QuoteDto.QuoteResponse quote = requestOverseasQuoteInternal(symbol, "NYSE");
-                // 유효한 가격인 경우에만 캐시에 저장
-                if (quote.getCurrentPrice().compareTo(BigDecimal.ZERO) > 0) {
-                    quoteCache.put("NYSE:" + symbol, quote);
-                    log.info("NYSE 대체 성공: {} - ${}", symbol, quote.getCurrentPrice());
-                }
-                return quote;
-            } catch (Exception fallbackException) {
-                log.error("NYSE도 실패: {} - {}", symbol, fallbackException.getMessage());
-                throw new BusinessException(ErrorCode.QUOTE_NOT_FOUND,
-                        "해외주식 시세 조회 실패: " + symbol);
-            }
-        }
+            return webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/uapi/overseas-price/v1/quotations/price")
+                            .queryParam("AUTH", "")
+                            .queryParam("EXCD", exchangeCode)
+                            .queryParam("SYMB", cleanSymbol)
+                            .build())
+                    .header("Content-Type", "application/json; charset=utf-8")
+                    .header("authorization", "Bearer " + accessToken)
+                    .header("appkey", appKey)
+                    .header("appsecret", appSecret)
+                    .header("tr_id", TR_ID_OVERSEAS_PRICE)
+                    .header("custtype", "P")
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .map(response -> {
+                        QuoteDto.QuoteResponse quote = parseOverseasQuoteResponse(symbol, exchange, response);
+                        if (quote.getCurrentPrice().compareTo(BigDecimal.ZERO) > 0) {
+                            quoteCache.put(cacheKey, quote);
+                            log.info("???? ?? ?? {} ({}) - ${}", symbol, exchange, quote.getCurrentPrice());
+                        }
+                        return quote;
+                    });
+        })
+                .transformDeferred(RateLimiterOperator.of(overseasRateLimiter))
+                .onErrorResume(e -> {
+                    if ("NASDAQ".equalsIgnoreCase(exchange)) {
+                        log.warn("NASDAQ ?? ??, NYSE? ???: {}", symbol);
+                        return getOverseasQuoteAsync(symbol, "NYSE");
+                    }
+                    log.warn("???? ?? ?? skip: {} ({}) - {}", symbol, exchange, e.getMessage());
+                    return Mono.empty();
+                });
     }
 
-    private QuoteDto.QuoteResponse requestOverseasQuoteInternal(String symbol, String exchange) {
-        enforceRateLimit(); // VTS Rate Limit 준수
 
-        String accessToken = tokenManager.getAccessToken();
-        String exchangeCode = getExchangeCode(exchange);
-
-        String cleanSymbol = cleanSymbol(symbol);
-
-        String response = webClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path("/uapi/overseas-price/v1/quotations/price")
-                        .queryParam("AUTH", "")
-                        .queryParam("EXCD", exchangeCode)
-                        .queryParam("SYMB", cleanSymbol)
-                        .build())
-                .header("Content-Type", "application/json; charset=utf-8")
-                .header("authorization", "Bearer " + accessToken)
-                .header("appkey", appKey)
-                .header("appsecret", appSecret)
-                .header("tr_id", TR_ID_OVERSEAS_PRICE)
-                .header("custtype", "P")
-                .retrieve()
-                .bodyToMono(String.class)
-                .block(Duration.ofSeconds(5)); //5초 타임아웃
-
-        return parseOverseasQuoteResponse(symbol, exchange, response);
-    }
+    
     
     /**
      * 해외주식 캔들 데이터 조회
@@ -246,42 +225,22 @@ public class KisOverseasQuoteService {
      * @param requests 종목 리스트 (심볼 + 거래소)
      * @return 각 종목의 시세 정보
      */
+    
     public List<QuoteDto.QuoteResponse> getOverseasQuotes(List<OverseasStockRequest> requests) {
-        log.info("해외주식 다중 조회: {} 건", requests.size());
+        log.info("???? ?? ??: {}?", requests.size());
 
-        List<QuoteDto.QuoteResponse> results = new ArrayList<>();
-
-        int batchSize = 5;
-        long batchDelayMs = 3000L;
-
-        for (int i = 0; i < requests.size(); i += batchSize) {
-            List<OverseasStockRequest> batch =
-                    requests.subList(i, Math.min(i + batchSize, requests.size()));
-
-            for (OverseasStockRequest req : batch) {
-                try {
-                    QuoteDto.QuoteResponse quote =
-                            getOverseasQuote(req.getSymbol(), req.getExchange());
-                    results.add(quote);
-                } catch (Exception e) {
-                    log.warn("해외주식 조회 스킵: {}", req.getSymbol());
-                }
-            }
-
-            // 마지막 batch가 아니면 delay
-            if (i + batchSize < requests.size()) {
-                try {
-                    log.debug("해외주식 batch 처리 완료, {}ms 대기", batchDelayMs);
-                    Thread.sleep(batchDelayMs);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-        }
-
-        return results;
+        return Flux.fromIterable(requests)
+                .flatMap(req -> getOverseasQuoteAsync(req.getSymbol(), req.getExchange())
+                        .onErrorResume(e -> {
+                            log.warn("???? ?? ?? skip: {} ({})", req.getSymbol(), req.getExchange());
+                            return Mono.empty();
+                        }))
+                .collectList()
+                .publishOn(Schedulers.boundedElastic())
+                .blockOptional()
+                .orElseGet(ArrayList::new);
     }
+
 
     
     /**

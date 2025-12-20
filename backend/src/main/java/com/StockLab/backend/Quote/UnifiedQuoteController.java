@@ -8,6 +8,9 @@ import lombok.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import java.util.*;
 
 /**
@@ -95,20 +98,20 @@ public class UnifiedQuoteController {
      */
     @GetMapping
     @Operation(summary = "다중 종목 시세 조회")
+    
     public ApiResponse<List<UnifiedQuoteResponse>> getQuotes(
             @RequestParam String symbols) {
-        
-        log.info("다중 조회 시작: {}", symbols);
-        
+
+        log.info("?? ?? ??: {}", symbols);
+
         String[] symbolArray = symbols.split(",");
         List<String> domesticSymbols = new ArrayList<>();
         List<String> overseasSymbols = new ArrayList<>();
-        
-        // 국내/해외 분류
+
         for (String symbol : symbolArray) {
             symbol = symbol.trim();
             if (symbol.isEmpty()) continue;
-            
+
             StockType stockType = detectStockType(symbol);
             if (stockType == StockType.DOMESTIC) {
                 domesticSymbols.add(symbol);
@@ -116,75 +119,46 @@ public class UnifiedQuoteController {
                 overseasSymbols.add(symbol);
             }
         }
-        
-        log.info("   국내: {}개, 해외: {}개", domesticSymbols.size(), overseasSymbols.size());
-        
-        List<UnifiedQuoteResponse> responses = new ArrayList<>();
-        int successCount = 0;
-        int failCount = 0;
-        
-        // ============ 국내 종목 처리 (Rate Limit 내장) ============
-        for (String symbol : domesticSymbols) {
-            try {
-                QuoteDto.QuoteResponse quote = domesticQuoteService.getQuote(symbol);
-                responses.add(UnifiedQuoteResponse.builder()
-                        .quote(quote)
-                        .stockType(StockType.DOMESTIC)
-                        .market(getMarketName(StockType.DOMESTIC))
-                        .currency(getCurrency(StockType.DOMESTIC))
-                        .build());
-                successCount++;
-            } catch (Exception e) {
-                log.warn("국내 종목 실패: {} - {}", symbol, e.getMessage());
-                failCount++;
-            }
-        }
-        
-        // ============ 해외 종목 처리 (배치 + 대기) ============
-        int batchSize = 2; // VTS: 한 번에 3개씩만 처리
-        for (int i = 0; i < overseasSymbols.size(); i += batchSize) {
-            List<String> batch = overseasSymbols.subList(
-                i, 
-                Math.min(i + batchSize, overseasSymbols.size())
-            );
-            
-            log.info("   해외 배치 {}/{} 처리 중...", (i / batchSize) + 1, 
-                    (overseasSymbols.size() + batchSize - 1) / batchSize);
-            
-            for (String symbol : batch) {
-                try {
-                    QuoteDto.QuoteResponse quote = overseasQuoteService.getUsStock(symbol);
-                    responses.add(UnifiedQuoteResponse.builder()
-                            .quote(quote)
-                            .stockType(StockType.OVERSEAS)
-                            .market(getMarketName(StockType.OVERSEAS))
-                            .currency(getCurrency(StockType.OVERSEAS))
-                            .build());
-                    successCount++;
-                } catch (Exception e) {
-                    log.warn("해외 종목 실패: {} - {}", symbol, e.getMessage());
-                    failCount++;
-                }
-            }
-            
-            // 배치 간 대기 (마지막 제외)
-            if (i + batchSize < overseasSymbols.size()) {
-                try {
-                    log.debug("⏱배치 간 2초 대기...");
-                    Thread.sleep(2000); // VTS: 배치 간 2초 대기
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    log.warn("배치 대기 중단됨");
-                    break;
-                }
-            }
-        }
-        
-        log.info("✅ 다중 조회 완료: 성공 {}/{}, 실패 {}", 
-                successCount, symbolArray.length, failCount);
-        
+
+        log.info("   ??: {}? ??: {}?", domesticSymbols.size(), overseasSymbols.size());
+
+        Flux<UnifiedQuoteResponse> domesticFlux = Flux.fromIterable(domesticSymbols)
+                .flatMap(symbol -> domesticQuoteService.getQuoteAsync(symbol)
+                        .map(quote -> UnifiedQuoteResponse.builder()
+                                .quote(quote)
+                                .stockType(StockType.DOMESTIC)
+                                .market(getMarketName(StockType.DOMESTIC))
+                                .currency(getCurrency(StockType.DOMESTIC))
+                                .build())
+                        .onErrorResume(e -> {
+                            log.warn("?? ?? ?? ??: {} - {}", symbol, e.getMessage());
+                            return Mono.empty();
+                        }));
+
+        Flux<UnifiedQuoteResponse> overseasFlux = Flux.fromIterable(overseasSymbols)
+                .flatMap(symbol -> overseasQuoteService.getOverseasQuoteAsync(symbol, "NASDAQ")
+                        .map(quote -> UnifiedQuoteResponse.builder()
+                                .quote(quote)
+                                .stockType(StockType.OVERSEAS)
+                                .market(getMarketName(StockType.OVERSEAS))
+                                .currency(getCurrency(StockType.OVERSEAS))
+                                .build())
+                        .onErrorResume(e -> {
+                            log.warn("?? ?? ?? ??: {} - {}", symbol, e.getMessage());
+                            return Mono.empty();
+                        }));
+
+        List<UnifiedQuoteResponse> responses = Flux.merge(domesticFlux, overseasFlux)
+                .collectList()
+                .publishOn(Schedulers.boundedElastic())
+                .blockOptional()
+                .orElseGet(ArrayList::new);
+
+        log.info("?? ?? ??: {}?", responses.size());
+
         return ApiResponse.success(responses);
     }
+
     
     /**
      * 캔들 차트 데이터 조회 (국내 + 해외)
