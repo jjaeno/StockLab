@@ -133,3 +133,88 @@ Android App (Kotlin / Jetpack Compose)
 - 푸시 알림(가격·체결 알림)
 - Redis 기반 분산 캐시
 - HTTPS 강제 및 보안 강화
+
+## 코드 실행 방법
+
+### 1. 백엔드 서버 실행 방법 (Spring Boot)
+
+#### 사전 준비
+- Java 17 이상
+- MySQL 8.0 이상
+- Firebase Admin SDK JSON 키 파일
+- 외부 API 키 발급
+  - 한국투자증권 Open API
+  - 네이버 뉴스 API
+  - OpenAI GPT API
+
+#### 환경 설정
+application.yml 또는 application.properties에 다음 정보 설정
+
+    spring:
+      datasource:
+        url: jdbc:mysql://localhost:3306/stocklab
+        username: root
+        password: [YOUR_DB_PASSWORD]
+
+    firebase:
+      config-path: src/main/resources/firebase/firebase-admin.json
+
+    api:
+      kis:
+        base-url: https://openapi.koreainvestment.com:9443
+        appkey: [YOUR_KIS_APPKEY]
+        appsecret: [YOUR_KIS_APPSECRET]
+      naver:
+        base-url: https://openapi.naver.com
+        client-id: [YOUR_NAVER_CLIENT_ID]
+        client-secret: [YOUR_NAVER_CLIENT_SECRET]
+      openai:
+        base-url: https://api.openai.com/v1
+        key: [YOUR_OPENAI_API_KEY]
+        model: gpt-4o-mini
+
+#### 실행 방법
+
+    cd backend
+    ./gradlew bootRun
+
+Swagger UI  
+http://localhost:8080/swagger-ui/index.html
+### 2. Android 앱 실행 방법
+
+#### 사전 준비
+- Android Studio Hedgehog 이상
+- JDK 17
+- Firebase 프로젝트 생성
+- google-services.json 파일
+
+#### Firebase 설정
+Firebase Console에서 Android 앱 등록 후  
+아래 경로에 파일 추가
+
+    android/app/google-services.json
+
+#### 서버 주소 설정
+build.gradle.kts 또는 BuildConfig에 서버 주소 설정
+
+    buildConfigField(
+        "String",
+        "BASE_URL",
+        "\"http://[SERVER_IP]:8080/api/v1/\""
+    )
+
+- Android Emulator: 10.0.2.2
+- 실제 기기: PC의 로컬 IP 주소
+
+#### 실행 방법
+1. Android Studio에서 프로젝트 열기
+2. Gradle Sync 실행
+3. 에뮬레이터 또는 실기기 선택
+4. Run 실행
+
+### 3. 실행 시 주의 사항
+
+- 백엔드 서버가 실행 중이어야 Android 앱이 정상 동작함
+- 한국투자증권 Open API는 호출 제한(Rate Limit)이 존재함
+- 다중 종목 조회 시 서버에서 캐시 및 병렬 처리 로직이 적용됨
+- OpenAI API 사용 시 API Key 요금 정책 확인 필요
